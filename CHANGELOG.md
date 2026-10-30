@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.2 — 2026-10-30
+
+- README: document the release path in full — trusted publishing via GitHub OIDC, no
+  `NPM_TOKEN`, automatic provenance, the tag/version guard, and the option to disallow
+  token publishing once trusted publishing is proven.
+
 ## 0.1.1 — 2026-10-30
 
 Documentation-only release: npm snapshots the README at publish time, so this

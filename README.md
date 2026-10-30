@@ -167,8 +167,11 @@ The suite covers query trimming order and the 128 cap, caller-spacing preservati
 
 ## Releasing
 
-Versions are published from CI with npm [trusted publishing](https://docs.npmjs.com/trusted-publishers)
-(OIDC, no long-lived token, provenance attached):
+Versions are published from CI with npm [trusted publishing](https://docs.npmjs.com/trusted-publishers):
+the workflow exchanges a GitHub OIDC token for a short-lived publish credential, so the repository
+holds **no `NPM_TOKEN` secret** and no long-lived write credential (including a 2FA-bypass token)
+is needed or permitted. Because the repository is public, npm attaches a **provenance attestation**
+automatically — no `--provenance` flag.
 
 ```bash
 npm version patch --no-git-tag-version   # or minor/major
@@ -176,6 +179,12 @@ git commit -am "chore: release v$(node -p "require('./package.json').version")"
 git tag "v$(node -p "require('./package.json').version")"
 git push origin main --follow-tags        # .github/workflows/publish.yml runs test + typecheck, then publishes
 ```
+
+`.github/workflows/publish.yml` runs the 68 tests and the typecheck, and refuses to publish when the
+pushed tag and `package.json` version disagree, so a mis-versioned tag fails the build instead of
+shipping the wrong number. For maximum safety the package's *Publishing access* can then be set to
+"Require two-factor authentication and disallow tokens": trusted publishing keeps working, token
+publishing stops.
 
 ## License
 
