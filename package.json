@@ -8,6 +8,12 @@
     "name": "yangbangcheng",
     "email": "bangchengyang@hotmail.com"
   },
+  "homepage": "https://github.com/DumbMice/pi-deepseek-websearch#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DumbMice/pi-deepseek-websearch.git"
+  },
+  "bugs": "https://github.com/DumbMice/pi-deepseek-websearch/issues",
   "keywords": [
     "pi-package",
     "pi-extension",

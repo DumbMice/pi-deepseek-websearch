@@ -37,7 +37,10 @@ Use it when you need DeepSeek's ranking, publication dates, or a specific `count
 # from npm, once the package is published
 pi install npm:pi-deepseek-websearch   # not `pi-deepseek-web-search`, which is a different package
 
-# from a working copy (works today, no publish required)
+# straight from GitHub
+pi install git:github.com/DumbMice/pi-deepseek-websearch
+
+# from a working copy (no publish required)
 pi install /absolute/path/to/pi-deepseek-websearch
 
 # try it for one session
@@ -156,4 +159,4 @@ The suite covers query trimming order and the 128 cap, caller-spacing preservati
 
 ## License
 
-MIT
+MIT. Issues and source: <https://github.com/DumbMice/pi-deepseek-websearch>.
