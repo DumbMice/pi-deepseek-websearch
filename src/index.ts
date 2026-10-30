@@ -30,7 +30,7 @@ const FETCH_TIMEOUT_MS = 60_000;
 const MAX_ATTEMPTS = 3;
 const MAX_ORI_QUESTION_CHARS = 128;
 const MAX_RESULT_CONTENT_CHARS = 4_000;
-const MAX_FETCH_CONTENT_CHARS = 20_000;
+const DEFAULT_FETCH_MAX_CHARS = 20_000;
 
 export interface SearchOptions {
 	query: string;
@@ -134,7 +134,7 @@ function isRetryableStatus(status: number): boolean {
 	return status === 408 || status === 429 || status >= 500;
 }
 
-function retryDelayMs(response: Response, attempt: number): number {
+export function retryDelayMs(response: Response, attempt: number): number {
 	const RETRY_CAP_MS = 5_000;
 	const header = response.headers.get("retry-after");
 	if (header) {
@@ -208,17 +208,23 @@ async function postDeepSeek<T>(
 			try {
 				return (await response.json()) as T;
 			} catch {
+				if (signal?.aborted) throw abortError(signal);
 				throw new Error(`DeepSeek ${path} returned invalid JSON`);
 			}
 		}
 
-		const raw = await response.text().catch(() => "");
+		let raw = "";
+		try {
+			raw = await response.text();
+		} catch {
+			if (signal?.aborted) throw abortError(signal);
+		}
 		let message = raw;
 		try {
 			const parsed = JSON.parse(raw) as { error?: { message?: string } };
 			message = parsed.error?.message?.trim() || raw;
 		} catch {}
-		message = REDACT(message.slice(0, 400), apiKey);
+		message = REDACT(message, apiKey).slice(0, 400);
 
 		const error = new DeepSeekHttpError(
 			response.status,
@@ -553,7 +559,7 @@ const FETCH_SCHEMA = {
 			type: "integer",
 			minimum: 500,
 			maximum: 200_000,
-			description: `Return at most this many characters (default ${MAX_FETCH_CONTENT_CHARS}). Values outside 500-200000 are clamped, and the clamp is reported in the output.`,
+			description: `Return at most this many characters (default ${DEFAULT_FETCH_MAX_CHARS}). Values outside 500-200000 are clamped, and the clamp is reported in the output.`,
 		},
 	},
 	required: ["url"],
@@ -587,7 +593,7 @@ export default function (pi: any): void {
 				return value
 					.filter((entry): entry is string => typeof entry === "string")
 					.map((entry) => entry.trim())
-					.filter(Boolean);
+					.filter((entry) => entry.length > 0 && !/[\s"]/.test(entry));
 			};
 			const oriChars = Array.from(
 				typeof params.ori_question === "string" ? params.ori_question.trim() : "",
@@ -706,8 +712,8 @@ export default function (pi: any): void {
 			ctx: any,
 		) {
 			const url = assertFetchableUrl(String(params.url ?? ""));
-			const requestedChars = Number(params.max_chars ?? MAX_FETCH_CONTENT_CHARS);
-			const requested = Number.isFinite(requestedChars) ? Math.floor(requestedChars) : MAX_FETCH_CONTENT_CHARS;
+			const requestedChars = Number(params.max_chars ?? DEFAULT_FETCH_MAX_CHARS);
+			const requested = Number.isFinite(requestedChars) ? Math.floor(requestedChars) : DEFAULT_FETCH_MAX_CHARS;
 			const maxChars = Math.min(200_000, Math.max(500, requested));
 			const clamped = maxChars !== requested;
 			const apiKey = await resolveApiKey(ctx);
@@ -728,15 +734,14 @@ export default function (pi: any): void {
 
 			const total = charLength(content);
 			const body = total > maxChars ? Array.from(content).slice(0, maxChars).join("") : content;
-			const text = [
+			const head = [
 				`DeepSeek fetch · ${total} chars${total > maxChars ? ` (truncated to ${maxChars})` : ""}${clamped ? ` (max_chars clamped to ${maxChars})` : ""}`,
 				title ? `title: ${title}` : "",
 				url.toString(),
-				"",
-				body,
 			]
-				.filter((line) => line !== "")
+				.filter(Boolean)
 				.join("\n");
+			const text = `${head}\n\n${body}`;
 
 			return {
 				content: [{ type: "text", text }],

@@ -11,6 +11,7 @@ import extension, {
 	formatResult,
 	MAX_QUERY_CHARS,
 	PRICE_PER_SUCCESSFUL_REQUEST_USD,
+	retryDelayMs,
 	type SearchOptions,
 } from "../src/index.ts";
 
@@ -947,6 +948,109 @@ test("deepseek_search: requestedCount reports non-finite and fractional asks con
 			assert.equal(result.details.requestedCount, expected, `count ${String(ask)}`);
 		}
 		assert.equal(stub.calls.at(-1)!.body.count, 1, "wire count is still clamped for a negative ask");
+	} finally {
+		stub.restore();
+	}
+});
+
+/* ------------------------------------- round-5 review: register items without tests */
+
+test("deepseek_search: the API request is configured not to follow redirects", async () => {
+	const { search, ctx } = harness();
+	let init: any;
+	const original = globalThis.fetch;
+	globalThis.fetch = (async (_url: any, options: any) => {
+		init = options;
+		return json({ results: [] });
+	}) as any;
+	try {
+		await search.execute("t", { query: "q" }, undefined, undefined, ctx);
+		assert.equal(init.redirect, "error");
+	} finally {
+		globalThis.fetch = original;
+	}
+});
+
+test("deepseek_search: upstream error text is sliced to 400 characters", async () => {
+	const { search, ctx } = harness();
+	const stub = stubFetch(() => json({ error: { message: "x".repeat(1000) } }, 400));
+	try {
+		await assert.rejects(
+			() => search.execute("t", { query: "q" }, undefined, undefined, ctx),
+			(e: Error) => e.message.includes("x".repeat(400)) && !e.message.includes("x".repeat(401)),
+		);
+	} finally {
+		stub.restore();
+	}
+});
+
+/* ---------------------------------- final review: transport and fetch coverage */
+
+test("deepseek_fetch: truncates the body, reports it, and clamps the upper bound", async () => {
+	const { fetch, ctx } = harness();
+	const longContent = "x".repeat(5000);
+	const stub = stubFetch(() => json({ title: "Doc", content: longContent }));
+
+	try {
+		const truncated = await fetch.execute(
+			"t",
+			{ url: "https://ex.com/doc", max_chars: 500 },
+			undefined,
+			undefined,
+			ctx,
+		);
+		assert.equal(truncated.details.truncated, true);
+		assert.equal(truncated.details.maxChars, 500);
+		assert.match(truncated.content[0].text, /\(truncated to 500\)/);
+		const body = truncated.content[0].text.split("\n\n").at(-1)!;
+		assert.equal(Array.from(body).length, 500);
+
+		const clamped = await fetch.execute(
+			"t",
+			{ url: "https://ex.com/doc", max_chars: 250_000 },
+			undefined,
+			undefined,
+			ctx,
+		);
+		assert.equal(clamped.details.maxChars, 200_000);
+		assert.equal(clamped.details.truncated, false);
+	} finally {
+		stub.restore();
+	}
+});
+
+test("deepseek_fetch: keeps a blank line between the header and the body", async () => {
+	const { fetch, ctx } = harness();
+	const stub = stubFetch(() => json({ title: "Doc", content: "first line\n\nsecond paragraph" }));
+	try {
+		const result = await fetch.execute("t", { url: "https://ex.com/doc" }, undefined, undefined, ctx);
+		assert.match(result.content[0].text, /https:\/\/ex\.com\/doc\n\nfirst line/);
+	} finally {
+		stub.restore();
+	}
+});
+
+test("retryDelayMs: honours positive delays, the HTTP-date form, and the 5 s cap", () => {
+	const header = (value: string) => new Response("", { headers: { "retry-after": value } });
+	assert.equal(retryDelayMs(header("1"), 0), 1000);
+	assert.equal(retryDelayMs(header("60"), 0), 5000, "cap");
+	assert.equal(retryDelayMs(header(new Date(Date.now() - 30_000).toUTCString()), 0), 0);
+	assert.equal(retryDelayMs(header("not-a-date"), 0), 500, "falls back to exponential");
+	assert.equal(retryDelayMs(new Response(""), 1), 1000);
+});
+
+test("deepseek_search: domain entries that would rewrite the query structure are dropped", async () => {
+	const { search, ctx } = harness();
+	const stub = stubFetch(() => json({ results: [] }));
+	try {
+		await search.execute(
+			"t",
+			{ query: "q", allowed_domains: ['ok.example', "bad domain.example", 'quo"te.example'] },
+			undefined,
+			undefined,
+			ctx,
+		);
+		assert.equal(stub.calls[0]!.body.query, "q site:ok.example");
 	} finally {
 		stub.restore();
 	}
