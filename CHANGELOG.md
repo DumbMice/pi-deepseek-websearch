@@ -7,6 +7,7 @@ First release.
 **Tools**
 
 - `deepseek_search` and `deepseek_fetch` over `POST /v1/tools/search` and `POST /v1/tools/fetch`.
+- Blank/whitespace-only `query` is rejected locally with a clear message.
 - Search parameters: `count` 1–50, `ori_question`, `need_content`, `localization`, `allowed_domains`, `blocked_domains`, `lang`, `recency`.
 - Fetch parameters: `url`, `max_chars` (500–200,000, default 20,000).
 - Result metadata: `date`, `authority` (`-1` → *unknown*), `rerank_score` (≥1.5 annotated), `site_name`; `site_icon` available in `details`.
@@ -16,6 +17,8 @@ First release.
 
 - A fitting query is sent exactly as written, spacing included.
 - An over-length query is trimmed instead of rejected: recency → language → domain filters → trailing words, with a final code-point cut only if a single token exceeds the budget. Every removal is reported.
+- Trimming is token-aware: quoted phrases stay whole and a trailing operator is never left dangling.
+- `ori_question` longer than 128 code points is cut, and the cut is reported in the output and `details`.
 - Unknown `recency` values and non-IP `localization` values are rejected with an actionable message.
 
 **Transport**
@@ -24,7 +27,8 @@ First release.
 - Documented remedies for `401`/`402`/`403`/`404`/`413`/`429`; all other `4xx` fail immediately.
 - 30 s search / 60 s fetch timeouts; caller abort wins and makes no request when already aborted.
 - Endpoint override via `PI_DEEPSEEK_BASE_URL` or `DEEPSEEK_SEARCH_BASE_URL`, with `/v1` and trailing slashes stripped.
-- API key from pi's `deepseek` provider, then `DEEPSEEK_API_KEY`; redacted from all error output.
+- API key from pi's `deepseek` provider, then `DEEPSEEK_API_KEY`; redacted from all error output, and upstream error text is sliced to 400 chars.
+- Fetch URLs are sent normalised, and the 8192-char limit is enforced on both the raw and normalised form.
 
 **Safety**
 
@@ -40,4 +44,4 @@ First release.
 
 **Tests**
 
-- 45 `node:test` cases with mocked HTTP — no key or network required.
+- 55 `node:test` cases with mocked HTTP — no key or network required.

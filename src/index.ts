@@ -143,6 +143,11 @@ function retryDelayMs(response: Response, attempt: number): number {
 	return 500 * 2 ** attempt;
 }
 
+/** Preserve the caller's abort reason; hosts use it to tell cancellation from failure. */
+function abortError(signal: AbortSignal): Error {
+	return signal.reason instanceof Error ? signal.reason : new Error("Aborted");
+}
+
 const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
 	new Promise((resolve, reject) => {
 		if (signal?.aborted) return reject(new Error("Aborted"));
@@ -164,7 +169,7 @@ async function postDeepSeek<T>(
 	signal: AbortSignal | undefined,
 	timeoutMs: number,
 ): Promise<T> {
-	if (signal?.aborted) throw new Error("Aborted");
+	if (signal?.aborted) throw abortError(signal);
 	for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
 		const timeout = AbortSignal.timeout(timeoutMs);
 		const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
@@ -182,7 +187,7 @@ async function postDeepSeek<T>(
 				signal: requestSignal,
 			});
 		} catch (err) {
-			if (signal?.aborted) throw new Error("Aborted");
+			if (signal?.aborted) throw abortError(signal);
 			const failure =
 				timeout.aborted
 					? new Error(`DeepSeek ${path} timed out after ${Math.round(timeoutMs / 1000)}s`)
@@ -259,8 +264,12 @@ export function fitQuery(options: SearchOptions): { query: string; dropped: stri
 	if (charLength(untouched) <= MAX_QUERY_CHARS) return { query: untouched, dropped };
 
 	// Only a query that cannot fit is rewritten, token by token, and every change is reported.
-	if (/\s{2,}/.test(raw)) dropped.push("query whitespace normalised");
-	let words = raw.split(/\s+/);
+	// A quoted phrase is one token: slicing mid-phrase would silently change its meaning.
+	const matchedTokens = raw.match(/"[^"]*"|\S+/g);
+	const tokens: string[] = matchedTokens ? [...matchedTokens] : [raw];
+	const quotesWereBalanced = ((raw.match(/"/g) ?? []).length % 2) === 0;
+	if (raw !== tokens.join(" ") || /[\t\n\r\f\v]/.test(raw)) dropped.push("query whitespace normalised");
+	let words = tokens;
 	let active = [...filters];
 
 	const overBudget = () => charLength(join(words, active)) > MAX_QUERY_CHARS;
@@ -280,7 +289,19 @@ export function fitQuery(options: SearchOptions): { query: string; dropped: stri
 
 	const wordsBefore = words.join(" ");
 	while (words.length > 1 && overBudget()) words = words.slice(0, -1);
-	if (words.join(" ") !== wordsBefore) dropped.push("trailing query words");
+	// Never leave a dangling operator (`site:`, `-site:`, `after:`, a bare `-`) or an
+	// unbalanced quote behind: DeepSeek would answer 400 and no retry would help.
+	const danglingOperator = /^(?:-|-[A-Za-z]+:|[A-Za-z]+:)$/;
+	const quoteCount = () => (words.join(" ").match(/"/g) ?? []).length;
+	while (
+		words.length > 1 &&
+		(danglingOperator.test(words[words.length - 1]!) || (quotesWereBalanced && quoteCount() % 2 === 1))
+	) {
+		words = words.slice(0, -1);
+	}
+	if (words.join(" ") !== wordsBefore && !dropped.includes("trailing query words")) {
+		dropped.push("trailing query words");
+	}
 
 	let query = join(words, active);
 	if (charLength(query) > MAX_QUERY_CHARS) {
@@ -315,9 +336,9 @@ function normalizeHost(hostname: string): string {
 	return hostname.replace(/^\[|\]$/g, "").replace(/\.+$/, "").toLowerCase();
 }
 
-/** `::ffff:127.0.0.1`, `::ffff:7f00:1` and `::7f00:1` all denote 127.0.0.1. */
+/** `::ffff:127.0.0.1`, `::ffff:7f00:1`, `::7f00:1` and NAT64 `64:ff9b::7f00:1` all mean 127.0.0.1. */
 function embeddedIpv4(host: string): string | null {
-	const tail = host.match(/^::(?:ffff:)?([0-9a-f:.]+)$/)?.[1];
+	const tail = host.match(/^(?:64:ff9b::|::ffff:|::)(.+)$/)?.[1];
 	if (!tail) return null;
 	if (tail.includes(".")) return tail;
 	const groups = tail.split(":");
@@ -361,7 +382,7 @@ function isPrivateHost(hostname: string): boolean {
 
 /** Docs: http(s), a host, no credentials, at most 8192 characters. */
 export function assertFetchableUrl(raw: string): URL {
-	if (raw.length > 8192) throw new Error("url must be at most 8192 characters.");
+	if (charLength(raw) > 8192) throw new Error("url must be at most 8192 characters.");
 	let url: URL;
 	try {
 		url = new URL(raw);
@@ -370,6 +391,9 @@ export function assertFetchableUrl(raw: string): URL {
 	}
 	if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("url must use http or https.");
 	if (url.username || url.password) throw new Error("url must not contain credentials.");
+	// The request sends the normalised form, so the limit must hold for that form too
+	// (IDN punycoding can make it longer than what the caller passed).
+	if (charLength(url.toString()) > 8192) throw new Error("url must be at most 8192 characters.");
 
 	// Extra safety beyond the docs: DeepSeek fetches server-side, so refuse to hand it
 	// intranet targets. Only literal local/private addresses and localhost names are
@@ -476,7 +500,7 @@ const SEARCH_SCHEMA = {
 		need_content: {
 			type: "boolean",
 			description:
-				"Return extracted page text instead of the short summary — up to 4,000 chars per result, with any truncation reported. Same price per request; uses more context.",
+				"Return extracted page text when the API provides it (falls back to the short summary) — up to 4,000 chars per result, with any truncation reported. Same price per request; uses more context.",
 		},
 		allowed_domains: {
 			type: "array",
@@ -511,13 +535,13 @@ const FETCH_SCHEMA = {
 		url: {
 			type: "string",
 			description:
-				"Absolute public HTTP(S) URL to read as Markdown. Local and private addresses are refused.",
+				"Absolute public HTTP(S) URL with no embedded credentials, read as Markdown. Local and private addresses are refused.",
 		},
 		max_chars: {
 			type: "integer",
 			minimum: 500,
 			maximum: 200_000,
-			description: `Return at most this many characters (default ${MAX_FETCH_CONTENT_CHARS}).`,
+			description: `Return at most this many characters (default ${MAX_FETCH_CONTENT_CHARS}). Values outside 500-200000 are clamped, and the clamp is reported in the output.`,
 		},
 	},
 	required: ["url"],
@@ -544,23 +568,25 @@ export default function (pi: any): void {
 			ctx: any,
 		) {
 			const rawCount = Number(params.count ?? 10);
-			const domains = (value: unknown): string[] =>
-				Array.isArray(value)
-					? value
-							.filter((entry): entry is string => typeof entry === "string")
-							.map((entry) => entry.trim())
-							.filter(Boolean)
-					: [];
-			const oriQuestion =
-				typeof params.ori_question === "string" && params.ori_question.trim()
-					? Array.from(params.ori_question.trim()).slice(0, MAX_ORI_QUESTION_CHARS).join("")
-					: undefined;
+			const domains = (value: unknown, label: string): string[] => {
+				if (value === undefined || value === null) return [];
+				if (!Array.isArray(value)) throw new Error(`${label} must be an array of domain names.`);
+				return value
+					.filter((entry): entry is string => typeof entry === "string")
+					.map((entry) => entry.trim())
+					.filter(Boolean);
+			};
+			const oriChars = Array.from(
+				typeof params.ori_question === "string" ? params.ori_question.trim() : "",
+			);
+			const oriQuestion = oriChars.length > 0 ? oriChars.slice(0, MAX_ORI_QUESTION_CHARS).join("") : undefined;
+			const oriQuestionTruncated = oriChars.length > MAX_ORI_QUESTION_CHARS;
 			const options: SearchOptions = {
 				query: assertQueryText(String(params.query ?? "")),
 				count: Math.min(50, Math.max(1, Number.isFinite(rawCount) ? Math.floor(rawCount) : 10)),
 				need_content: params.need_content === true,
-				allowedDomains: domains(params.allowed_domains),
-				blockedDomains: domains(params.blocked_domains),
+				allowedDomains: domains(params.allowed_domains, "allowed_domains"),
+				blockedDomains: domains(params.blocked_domains, "blocked_domains"),
 				...(oriQuestion ? { ori_question: oriQuestion } : {}),
 				...(typeof params.lang === "string" && params.lang.trim() ? { lang: params.lang.trim() } : {}),
 				...(params.recency ? { recency: params.recency } : {}),
@@ -569,8 +595,9 @@ export default function (pi: any): void {
 					: {}),
 			};
 
-			const apiKey = await resolveApiKey(ctx);
+			// Validate and trim first: a bad parameter should not be masked by a missing key.
 			const { query, dropped } = fitQuery(options);
+			const apiKey = await resolveApiKey(ctx);
 
 			const body: Record<string, unknown> = { query, count: options.count };
 			if (options.need_content) body.need_content = true;
@@ -597,11 +624,15 @@ export default function (pi: any): void {
 				`DeepSeek search · ${results.length} result${results.length === 1 ? "" : "s"}`,
 			];
 			header.push(`query: ${query}`);
-			if (options.ori_question) header.push(`ori_question: ${options.ori_question}`);
+			if (options.ori_question) {
+				header.push(
+					`ori_question: ${options.ori_question}${oriQuestionTruncated ? ` (cut to ${MAX_ORI_QUESTION_CHARS} chars)` : ""}`,
+				);
+			}
 			if (dropped.length > 0)
 				header.push(`trimmed to fit ${MAX_QUERY_CHARS} chars: ${dropped.join("; ")}`);
 			if (discarded > 0)
-				header.push(`discarded ${discarded} result${discarded === 1 ? "" : "s"} without an http(s) URL`);
+				header.push(`discarded ${discarded} unusable result${discarded === 1 ? "" : "s"} (no http(s) URL)`);
 
 			const text =
 				results.length === 0
@@ -616,7 +647,9 @@ export default function (pi: any): void {
 					query,
 					dropped,
 					count: results.length,
+					requestedCount: options.count,
 					discarded,
+					oriQuestionTruncated,
 					needContent: options.need_content,
 					estimatedCostUsd: rawResults.length > 0 ? PRICE_PER_SUCCESSFUL_REQUEST_USD : 0,
 					results: results.map((result) => ({
@@ -625,8 +658,14 @@ export default function (pi: any): void {
 						site: typeof result.site_name === "string" ? result.site_name : null,
 						siteIcon: typeof result.site_icon === "string" ? result.site_icon : null,
 						date: typeof result.date === "string" ? result.date : null,
-						authority: typeof result.authority === "number" ? result.authority : null,
-						score: typeof result.rerank_score === "number" ? result.rerank_score : null,
+						authority:
+							typeof result.authority === "number" && Number.isFinite(result.authority)
+								? result.authority
+								: null,
+						score:
+							typeof result.rerank_score === "number" && Number.isFinite(result.rerank_score)
+								? result.rerank_score
+								: null,
 					})),
 				},
 			};
@@ -638,7 +677,8 @@ export default function (pi: any): void {
 		label: "DeepSeek Fetch",
 		description:
 			"Read one page through DeepSeek's Fetch API and get it back as Markdown (already extracted, rendered server-side). " +
-			"Use after deepseek_search when a summary is not enough, or for a specific URL you already know.",
+			"Use after deepseek_search when a summary is not enough, or for a specific URL you already know. " +
+			"Billed the same $0.00075 per successful fetch; failures and empty extractions are free.",
 		promptSnippet: "Fetch a URL as Markdown via DeepSeek (server-side rendering + extraction)",
 		parameters: FETCH_SCHEMA,
 		async execute(

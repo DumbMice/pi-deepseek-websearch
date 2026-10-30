@@ -525,7 +525,7 @@ test("deepseek_search: cost follows the raw result array, not client-side filter
 		assert.equal(result.details.count, 0);
 		assert.equal(result.details.discarded, 2);
 		assert.equal(result.details.estimatedCostUsd, PRICE_PER_SUCCESSFUL_REQUEST_USD);
-		assert.match(result.content[0].text, /discarded 2 results without an http\(s\) URL/);
+		assert.match(result.content[0].text, /discarded 2 unusable results \(no http\(s\) URL\)/);
 	} finally {
 		stub.restore();
 	}
@@ -643,7 +643,7 @@ test("deepseek_search: an already-aborted signal makes no request", async () => 
 	try {
 		await assert.rejects(
 			() => search.execute("t", { query: "q" }, AbortSignal.abort(), undefined, ctx),
-			/Aborted/,
+			(e: Error) => e.name === "AbortError" || /abort/i.test(e.message),
 		);
 		assert.equal(stub.calls.length, 0);
 	} finally {
@@ -658,6 +658,136 @@ test("deepseek_fetch: a clamped max_chars is reported", async () => {
 		const result = await fetch.execute("t", { url: "https://ex.com/d", max_chars: 10 }, undefined, undefined, ctx);
 		assert.equal(result.details.maxChars, 500);
 		assert.match(result.content[0].text, /max_chars clamped to 500/);
+	} finally {
+		stub.restore();
+	}
+});
+
+/* --------------------------------------- round-2 review regressions and gaps */
+
+test("fitQuery: trimming never leaves a dangling operator", () => {
+	const { query, dropped } = fitQuery({
+		...base(),
+		query: "a ".repeat(60).trim() + " site: example.com",
+	});
+	assert.ok(!/(?:^|\s)(?:-|-?[a-z]+:)$/i.test(query), `dangling operator in ${JSON.stringify(query)}`);
+	assert.ok(query.length <= MAX_QUERY_CHARS);
+	assert.ok(dropped.includes("trailing query words"));
+});
+
+test("fitQuery: quoted phrases are atomic, so trimming cannot unbalance quotes", () => {
+	const { query } = fitQuery({ ...base(), query: "word ".repeat(25) + '"alpha beta gamma"' });
+	assert.equal((query.match(/"/g) ?? []).length % 2, 0, `unbalanced quotes in ${JSON.stringify(query)}`);
+	assert.ok(!query.includes('"alpha beta') || query.includes('"alpha beta gamma"'));
+});
+
+test("fitQuery: a single tab that gets rewritten is reported", () => {
+	const { query, dropped } = fitQuery({ ...base(), query: "a\tb " + "c ".repeat(70).trim() });
+	assert.ok(!query.includes("\t"));
+	assert.ok(dropped.includes("query whitespace normalised"), JSON.stringify(dropped));
+});
+
+test("fitQuery: exactly 128 chars is left alone; 129 is trimmed", () => {
+	assert.deepEqual(fitQuery({ ...base(), query: "x".repeat(128) }).dropped, []);
+	assert.deepEqual(fitQuery({ ...base(), query: "x".repeat(128) }).query, "x".repeat(128));
+	const over = fitQuery({ ...base(), query: "x".repeat(129) });
+	assert.equal(Array.from(over.query).length, 128);
+	assert.ok(over.dropped.includes("query tail"));
+});
+
+test("assertFetchableUrl: bare hex-pair IPv6 and NAT64 forms of loopback are blocked; public hosts are not", () => {
+	for (const url of ["http://[::7f00:1]/x", "http://[::ffff:0:1]/x", "http://[64:ff9b::7f00:1]/x"]) {
+		assert.throws(() => assertFetchableUrl(url), /local or private/, url);
+	}
+	for (const url of [
+		"http://example.com./x",
+		"http://notlocalhost.example/x",
+		"http://[2001:db8::1]/x",
+		"http://[::abcd:1234]/x",
+	]) {
+		assert.ok(assertFetchableUrl(url), url);
+	}
+});
+
+test("deepseek_search: a cut ori_question is reported in the output and details", async () => {
+	const { search, ctx } = harness();
+	const stub = stubFetch(() => json({ results: [] }));
+	try {
+		const result = await search.execute(
+			"t",
+			{ query: "q", ori_question: "a" + "\u{1F600}".repeat(200) },
+			undefined,
+			undefined,
+			ctx,
+		);
+		assert.equal(result.details.oriQuestionTruncated, true);
+		assert.match(result.content[0].text, /ori_question: .* \(cut to 128 chars\)/);
+	} finally {
+		stub.restore();
+	}
+});
+
+test("deepseek_search: a non-array domain filter is rejected instead of silently ignored", async () => {
+	const { search, ctx } = harness();
+	const stub = stubFetch(() => json({ results: [] }));
+	try {
+		await assert.rejects(
+			() => search.execute("t", { query: "q", allowed_domains: "example.com" }, undefined, undefined, ctx),
+			/allowed_domains must be an array/,
+		);
+		assert.equal(stub.calls.length, 0);
+	} finally {
+		stub.restore();
+	}
+});
+
+test("deepseek_search: parameter validation runs before the credential lookup", async () => {
+	const { search } = harness();
+	const original = process.env.DEEPSEEK_API_KEY;
+	delete process.env.DEEPSEEK_API_KEY;
+	try {
+		await assert.rejects(
+			() =>
+				search.execute(
+					"t",
+					{ query: "q", recency: "yesterday" },
+					undefined,
+					undefined,
+					{ modelRegistry: {} },
+				),
+			/recency must be one of/,
+		);
+	} finally {
+		if (original !== undefined) process.env.DEEPSEEK_API_KEY = original;
+	}
+});
+
+test("deepseek_search: non-finite scores are omitted from details rather than serialised", async () => {
+	const { search, ctx } = harness();
+	const original = globalThis.fetch;
+	globalThis.fetch = (async () =>
+		new Response('{"results":[{"title":"t","url":"https://ex.com","authority":1e999,"rerank_score":1e999}]}', {
+			status: 200,
+			headers: { "content-type": "application/json" },
+		})) as any;
+	try {
+		const result = await search.execute("t", { query: "q" }, undefined, undefined, ctx);
+		assert.equal(result.details.results[0].authority, null);
+		assert.equal(result.details.results[0].score, null);
+		assert.doesNotThrow(() => JSON.stringify(result.details));
+	} finally {
+		globalThis.fetch = original;
+	}
+});
+
+test("deepseek_search: null and scalar results are counted as discarded, not rendered", async () => {
+	const { search, ctx } = harness();
+	const stub = stubFetch(() => json({ results: [null, 42, { title: "ok", url: "https://ex.com" }] }));
+	try {
+		const result = await search.execute("t", { query: "q" }, undefined, undefined, ctx);
+		assert.equal(result.details.count, 1);
+		assert.equal(result.details.discarded, 2);
+		assert.equal(result.details.requestedCount, 10);
 	} finally {
 		stub.restore();
 	}
