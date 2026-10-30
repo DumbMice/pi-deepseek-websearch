@@ -1,75 +1,80 @@
 # Changelog
 
-## 0.1.3 — 2026-10-30
+All notable changes to this extension are documented in this file. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-- README is user-facing only: the development and release instructions moved to
-  CONTRIBUTING.md, with a single pointer left behind.
+## [Unreleased]
 
-## 0.1.2 — 2026-10-30
+## [0.1.4] - 2026-10-30
 
-- README: document the release path in full — trusted publishing via GitHub OIDC, no
-  `NPM_TOKEN`, automatic provenance, the tag/version guard, and the option to disallow
-  token publishing once trusted publishing is proven.
+### Added
 
-## 0.1.1 — 2026-10-30
+- Test coverage for previously unpinned behaviour: the API request is sent with `redirect: "error"` so
+  a redirect is not followed (register item 15), upstream error text is sliced to 400 characters
+  (register item 22), Fetch output truncation and the `max_chars` upper clamp, the `retry-after` delay
+  and its 5 second cap, and rejection of domain filters that would rewrite the query structure.
 
-Documentation-only release: npm snapshots the README at publish time, so this
-republishes the corrected text.
+### Changed
 
-- Install command moved directly under the intro and no longer says "once the
-  package is published".
-- The sample-output block no longer overflows horizontally; the per-result
-  fields it used to cram into a comment are described in the prose below it.
-- README badges: npm version, license, Node engine, CI status, and a
-  "coexists with pi-web-access" badge (a downloads badge is deferred until the
-  package has statistics).
+- Documentation overhaul. The README is now strictly for users of the extension: what the tools do,
+  when to use them, parameters, cost, observable behaviour and troubleshooting. The list of deliberate
+  differences from DeepSeek's API moved to `docs/docs-alignment.md`. Contributor, architecture and
+  release material moved to `AGENTS.md` (`CONTRIBUTING.md` now points there), including the corrected
+  release recipe with annotated tags. This changelog moved to the Keep a Changelog format.
+- Package metadata: the npm description and keywords were rewritten, `files` now also ships `docs/`,
+  `AGENTS.md` and `CONTRIBUTING.md` so the deviation register and contributor guide travel with the
+  package, `author.name` is `DumbMice`, and the `LICENSE` copyright holder changed to `DumbMice` to
+  match.
 
-## 0.1.0 — 2026-10-30
+### Fixed
 
-First release. Package name: `@dumbmice/pi-deepseek-websearch` (web search and page fetch over
-DeepSeek's Search & Fetch APIs); published scoped because npm treats the unscoped name as too
-similar to the existing `pi-deepseek-web-search`.
+- The contributor release recipe paired `git tag` with `git push --follow-tags`, which pushes only
+  annotated tags, so the documented steps would not have published anything. The recipe now creates an
+  annotated tag after the version bump.
 
-**Tools**
+## [0.1.3] - 2026-10-30
 
-- `deepseek_search` and `deepseek_fetch` over `POST /v1/tools/search` and `POST /v1/tools/fetch`.
-- Blank/whitespace-only `query` is rejected locally with a clear message.
-- Search parameters: `count` 1–50, `ori_question`, `need_content`, `localization`, `allowed_domains`, `blocked_domains`, `lang`, `recency`.
-- Fetch parameters: `url`, `max_chars` (500–200,000, default 20,000).
-- Result metadata: `date`, `authority` (`-1` → *unknown*), `rerank_score` (≥1.5 annotated), `site_name`; `site_icon` available in `details`.
-- `details` reports the final query, anything trimmed, discarded non-http(s) results, and `estimatedCostUsd`.
+### Changed
 
-**Query handling**
+- README kept user-facing: development and release instructions moved to `CONTRIBUTING.md`, with a
+  single pointer left behind.
 
-- A fitting query is sent exactly as written, spacing included.
-- An over-length query is trimmed instead of rejected: recency → language → domain filters → trailing words, with a final code-point cut only if a single token exceeds the budget. Every removal is reported.
-- Trimming is token-aware: quoted phrases stay whole and a trailing operator is never left dangling.
-- `ori_question` longer than 128 code points is cut, and the cut is reported in the output and `details`; the tool-parameter schema has no `maxLength`, so the code-point cut is authoritative.
-- `details.requestedCount` reports the pre-clamp `count` ask.
-- Unknown `recency` values and non-IP `localization` values are rejected with an actionable message.
+## [0.1.2] - 2026-10-30
 
-**Transport**
+### Changed
 
-- Retries for `408`, `429`, any `5xx`, network failures and timeouts; 3 attempts; `retry-after` honoured in seconds or HTTP-date form, capped at 5 s.
-- Documented remedies for `401`/`402`/`403`/`404`/`413`/`429`; all other `4xx` fail immediately.
-- 30 s search / 60 s fetch timeouts; the caller's abort reason is preserved on every path, including during retry backoff.
-- A 200 search response without a `results` array is rejected as an invalid response rather than reported as "No results".
-- Endpoint override via `PI_DEEPSEEK_BASE_URL` or `DEEPSEEK_SEARCH_BASE_URL`, with `/v1` and trailing slashes stripped.
-- API key from pi's `deepseek` provider, then `DEEPSEEK_API_KEY`; redacted from all error output, and upstream error text is sliced to 400 chars.
-- Fetch URLs are sent normalised, and the 8192-char limit is enforced on both the raw and normalised form.
+- README documents the release path: trusted publishing through GitHub OIDC, no `NPM_TOKEN`,
+  automatic provenance, the tag/version guard, and the option to disallow token publishing.
 
-**Safety**
+## [0.1.1] - 2026-10-30
 
-- `deepseek_fetch` refuses localhost (including trailing-dot forms), IPv4 private/loopback/CGNAT/link-local/benchmarking ranges, IPv6 `::`, `::1`, `fc00::/7`, `fe80::/10`, and IPv4-mapped IPv6 forms.
-- Markdown unescaping never applies inside fenced code blocks (including indented fences) or inline code spans.
-- Malformed result fields degrade instead of failing the whole call.
+### Changed
 
-**Cost and compatibility**
+- Documentation only: install command moved up, sample output reflowed, README badges added (a
+  downloads badge is deferred until the package has statistics).
 
-- `estimatedCostUsd` = $0.00075 per billable request, following the raw result array so client-side filtering cannot under-report; 0 for an empty result set.
-- Coexists with `pi-web-access`: distinct tool names, no config keys.
-- Validated against DeepSeek API docs as of 2026-10-30.
+## [0.1.0] - 2026-10-30
 
-**Tests**
+Published at $0.00075 per billable request for both Search and Fetch; failures, timeouts and empty
+results are not billed. Validated against the DeepSeek API documentation as of 2026-10-30.
 
-- 68 `node:test` cases with mocked HTTP — no key or network required.
+### Added
+
+- `deepseek_search` and `deepseek_fetch`, over `POST /v1/tools/search` and `POST /v1/tools/fetch`.
+- Search parameters: `count` (1–50), `ori_question`, `need_content`, `localization`,
+  `allowed_domains`, `blocked_domains`, `lang`, `recency`. Fetch parameters: `url`, `max_chars`.
+- Result metadata: publication date, authority tier, rerank score and site name, with `site_icon`,
+  mapped results and run metadata in `details`.
+- Client-side trimming of over-length queries, reporting every removal.
+- Retries for `408`, `429`, any `5xx`, network failures and timeouts, three attempts, with
+  `retry-after` honoured up to 5 seconds.
+- `deepseek_fetch` rejects local and private targets and never unescapes inside code.
+
+
+[Unreleased]: https://github.com/DumbMice/pi-deepseek-websearch/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/DumbMice/pi-deepseek-websearch/compare/v0.1.3...v0.1.4
+[0.1.3]: https://github.com/DumbMice/pi-deepseek-websearch/compare/v0.1.2...v0.1.3
+[0.1.2]: https://github.com/DumbMice/pi-deepseek-websearch/compare/v0.1.1...v0.1.2
+[0.1.1]: https://www.npmjs.com/package/@dumbmice/pi-deepseek-websearch/v/0.1.1
+[0.1.0]: https://www.npmjs.com/package/@dumbmice/pi-deepseek-websearch/v/0.1.0
