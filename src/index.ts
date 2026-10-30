@@ -52,6 +52,7 @@ interface DeepSeekResult {
 	summary?: string;
 	content?: string;
 	site_name?: string | null;
+	site_icon?: string | null;
 	date?: string | null;
 	authority?: number;
 }
@@ -67,7 +68,12 @@ class DeepSeekHttpError extends Error {
 
 /* ---------------------------------------------------------------- transport */
 
-const RETRYABLE = new Set([408, 429, 500, 502, 503, 504]);
+const RECENCY_DAYS: Record<NonNullable<SearchOptions["recency"]>, number> = {
+	day: 1,
+	week: 7,
+	month: 30,
+	year: 365,
+};
 
 const REDACT = (text: string, key: string | undefined): string =>
 	key && key.length > 8 ? text.split(key).join("[redacted]") : text;
@@ -81,7 +87,13 @@ export function baseUrl(): string {
 }
 
 async function resolveApiKey(ctx: any): Promise<string> {
-	const fromPi = await ctx?.modelRegistry?.getApiKeyForProvider?.("deepseek");
+	let fromPi: unknown;
+	try {
+		fromPi = await ctx?.modelRegistry?.getApiKeyForProvider?.("deepseek");
+	} catch (err) {
+		const reason = err instanceof Error ? err.message : String(err);
+		throw new Error(`Could not read pi's \`deepseek\` provider credentials: ${reason}`);
+	}
 	const key =
 		typeof fromPi === "string" && fromPi.trim() ? fromPi.trim() : process.env.DEEPSEEK_API_KEY?.trim();
 	if (!key) {
@@ -111,13 +123,22 @@ export function errorHint(status: number, path: "/v1/tools/search" | "/v1/tools/
 	return "";
 }
 
+/**
+ * Docs: "For HTTP 408, 429, or 5xx errors, wait and retry." Every other status fails fast
+ * ("Do not retry other 4xx errors without changing the request.").
+ */
+function isRetryableStatus(status: number): boolean {
+	return status === 408 || status === 429 || status >= 500;
+}
+
 function retryDelayMs(response: Response, attempt: number): number {
+	const RETRY_CAP_MS = 5_000;
 	const header = response.headers.get("retry-after");
 	if (header) {
 		const seconds = Number(header);
-		if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1000, 5_000);
+		if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1000, RETRY_CAP_MS);
 		const at = Date.parse(header);
-		if (Number.isFinite(at)) return Math.min(Math.max(at - Date.now(), 0), 5_000);
+		if (Number.isFinite(at)) return Math.min(Math.max(at - Date.now(), 0), RETRY_CAP_MS);
 	}
 	return 500 * 2 ** attempt;
 }
@@ -143,7 +164,7 @@ async function postDeepSeek<T>(
 	signal: AbortSignal | undefined,
 	timeoutMs: number,
 ): Promise<T> {
-	let lastError: Error | undefined;
+	if (signal?.aborted) throw new Error("Aborted");
 	for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
 		const timeout = AbortSignal.timeout(timeoutMs);
 		const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
@@ -162,17 +183,17 @@ async function postDeepSeek<T>(
 			});
 		} catch (err) {
 			if (signal?.aborted) throw new Error("Aborted");
-			if (timeout.aborted) {
-				lastError = new Error(`DeepSeek ${path} timed out after ${Math.round(timeoutMs / 1000)}s`);
-			} else {
-				const message = err instanceof Error ? err.message : String(err);
-				lastError = new Error(`DeepSeek ${path} request failed: ${REDACT(message, apiKey)}`);
-			}
+			const failure =
+				timeout.aborted
+					? new Error(`DeepSeek ${path} timed out after ${Math.round(timeoutMs / 1000)}s`)
+					: new Error(
+							`DeepSeek ${path} request failed: ${REDACT(err instanceof Error ? err.message : String(err), apiKey)}`,
+						);
 			if (attempt < MAX_ATTEMPTS - 1) {
 				await sleep(500 * 2 ** attempt, signal);
 				continue;
 			}
-			throw lastError;
+			throw failure;
 		}
 
 		if (response.ok) {
@@ -195,14 +216,13 @@ async function postDeepSeek<T>(
 			response.status,
 			`DeepSeek ${path} failed (HTTP ${response.status}): ${message}${errorHint(response.status, path)}`,
 		);
-		if (RETRYABLE.has(response.status) && attempt < MAX_ATTEMPTS - 1) {
-			lastError = error;
+		if (isRetryableStatus(response.status) && attempt < MAX_ATTEMPTS - 1) {
 			await sleep(retryDelayMs(response, attempt), signal);
 			continue;
 		}
 		throw error;
 	}
-	throw lastError ?? new Error(`DeepSeek ${path} failed`);
+	throw new Error(`DeepSeek ${path} failed`);
 }
 
 /* ------------------------------------------------------------------- query */
@@ -222,21 +242,28 @@ export function fitQuery(options: SearchOptions): { query: string; dropped: stri
 	for (const domain of options.blockedDomains) filters.push(`-site:${domain}`);
 	if (options.lang) filters.push(`lang:${options.lang}`);
 	if (options.recency) {
-		const days = { day: 1, week: 7, month: 30, year: 365 }[options.recency];
+		const days = RECENCY_DAYS[options.recency];
+		if (days === undefined) {
+			throw new Error(`recency must be one of ${Object.keys(RECENCY_DAYS).join(", ")}.`);
+		}
 		filters.push(`after:${new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10)}`);
 	}
 
-	const assemble = (words: string[], activeFilters: string[]): string =>
+	const raw = options.query.trim();
+	const join = (words: string[], activeFilters: string[]): string =>
 		[words.join(" "), ...activeFilters].filter(Boolean).join(" ");
 
-	let words = options.query.trim().split(/\s+/);
+	// Docs: "The query is forwarded with its search syntax intact." Keep the caller's
+	// spacing and operator text whenever the assembled query already fits.
+	const untouched = [raw, ...filters].filter(Boolean).join(" ");
+	if (charLength(untouched) <= MAX_QUERY_CHARS) return { query: untouched, dropped };
+
+	// Only a query that cannot fit is rewritten, token by token, and every change is reported.
+	if (/\s{2,}/.test(raw)) dropped.push("query whitespace normalised");
+	let words = raw.split(/\s+/);
 	let active = [...filters];
 
-	if (charLength(assemble(words, active)) <= MAX_QUERY_CHARS) {
-		return { query: assemble(words, active), dropped };
-	}
-
-	const overBudget = () => charLength(assemble(words, active)) > MAX_QUERY_CHARS;
+	const overBudget = () => charLength(join(words, active)) > MAX_QUERY_CHARS;
 	const dropFilter = (predicate: (filter: string) => boolean, label: (filter: string) => string): void => {
 		const index = active.findIndex(predicate);
 		if (index < 0 || !overBudget()) return;
@@ -255,8 +282,10 @@ export function fitQuery(options: SearchOptions): { query: string; dropped: stri
 	while (words.length > 1 && overBudget()) words = words.slice(0, -1);
 	if (words.join(" ") !== wordsBefore) dropped.push("trailing query words");
 
-	let query = assemble(words, active);
+	let query = join(words, active);
 	if (charLength(query) > MAX_QUERY_CHARS) {
+		// A single token longer than the whole budget: cutting it is unavoidable, so do it
+		// by code point and report it rather than sending an invalid request.
 		query = Array.from(query).slice(0, MAX_QUERY_CHARS).join("").trim();
 		dropped.push("query tail");
 	}
@@ -278,6 +307,58 @@ export function assertLocalization(value: string): string {
 	return trimmed;
 }
 
+/**
+ * Normalise a WHATWG hostname: drop IPv6 brackets, case, and trailing dots
+ * (`localhost.` and `localhost` are the same host to a resolver).
+ */
+function normalizeHost(hostname: string): string {
+	return hostname.replace(/^\[|\]$/g, "").replace(/\.+$/, "").toLowerCase();
+}
+
+/** `::ffff:127.0.0.1`, `::ffff:7f00:1` and `::7f00:1` all denote 127.0.0.1. */
+function embeddedIpv4(host: string): string | null {
+	const tail = host.match(/^::(?:ffff:)?([0-9a-f:.]+)$/)?.[1];
+	if (!tail) return null;
+	if (tail.includes(".")) return tail;
+	const groups = tail.split(":");
+	if (groups.length !== 2) return null;
+	const hi = Number.parseInt(groups[0]!, 16);
+	const lo = Number.parseInt(groups[1]!, 16);
+	if (!Number.isFinite(hi) || !Number.isFinite(lo)) return null;
+	return [hi >> 8, hi & 0xff, lo >> 8, lo & 0xff].join(".");
+}
+
+/** RFC 1918, loopback, link-local, CGNAT, "this network" and benchmarking ranges. */
+function isPrivateIpv4(ip: string): boolean {
+	const parts = ip.split(".").map(Number);
+	if (parts.length !== 4) return false;
+	if (parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
+	const [a, b] = parts as [number, number, number, number];
+	return (
+		a === 0 ||
+		a === 10 ||
+		a === 127 ||
+		(a === 100 && b >= 64 && b <= 127) ||
+		(a === 169 && b === 254) ||
+		(a === 172 && b >= 16 && b <= 31) ||
+		(a === 192 && b === 168) ||
+		(a === 198 && (b === 18 || b === 19))
+	);
+}
+
+function isPrivateHost(hostname: string): boolean {
+	const host = normalizeHost(hostname);
+	const candidate = embeddedIpv4(host) ?? host;
+	if (candidate === "localhost" || candidate.endsWith(".localhost")) return true;
+	if (isIP(candidate) === 4) return isPrivateIpv4(candidate);
+	if (isIP(candidate) === 6) {
+		if (candidate === "::" || candidate === "::1") return true;
+		if (/^f[cd][0-9a-f]{0,2}::?/.test(candidate)) return true; // fc00::/7 unique-local
+		if (/^fe[89ab][0-9a-f]?::?/.test(candidate)) return true; // fe80::/10 link-local
+	}
+	return false;
+}
+
 /** Docs: http(s), a host, no credentials, at most 8192 characters. */
 export function assertFetchableUrl(raw: string): URL {
 	if (raw.length > 8192) throw new Error("url must be at most 8192 characters.");
@@ -291,22 +372,9 @@ export function assertFetchableUrl(raw: string): URL {
 	if (url.username || url.password) throw new Error("url must not contain credentials.");
 
 	// Extra safety beyond the docs: DeepSeek fetches server-side, so refuse to hand it
-	// intranet targets. Local/private ranges only; public hosts are unaffected.
-	const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
-	const isPrivate =
-		host === "localhost" ||
-		host.endsWith(".localhost") ||
-		host === "::1" ||
-		host === "::" ||
-		/^127\./.test(host) ||
-		/^10\./.test(host) ||
-		/^192\.168\./.test(host) ||
-		/^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
-		/^169\.254\./.test(host) ||
-		/^0\./.test(host) ||
-		/^f[cd][0-9a-f]{2}:/.test(host) ||
-		/^fe80:/.test(host);
-	if (isPrivate) throw new Error("url must not target a local or private address.");
+	// intranet targets. Only literal local/private addresses and localhost names are
+	// caught here; a public hostname that resolves privately is not (no DNS lookup).
+	if (isPrivateHost(url.hostname)) throw new Error("url must not target a local or private address.");
 	return url;
 }
 
@@ -316,9 +384,9 @@ export function cleanMarkdown(markdown: string): string {
 	return markdown
 		.split("\n")
 		.map((line) => {
-			const marker = line.match(/^\s{0,3}(`{3,}|~{3,})/);
+			const marker = line.match(/^(\s*)(`{3,}|~{3,})/);
 			if (marker) {
-				const token = marker[1]!;
+				const token = marker[2]!;
 				if (fence === null) {
 					fence = { char: token[0]!, length: token.length };
 				} else if (
@@ -345,26 +413,31 @@ export function cleanMarkdown(markdown: string): string {
 /* ---------------------------------------------------------------- rendering */
 
 export function formatResult(result: DeepSeekResult, index: number, withContent: boolean): string {
+	// Response fields are trusted to exist but not to have the documented type: a single
+	// malformed result must degrade, not destroy the whole answer.
+	const text = (value: unknown): string => (typeof value === "string" ? value.trim() : "");
 	const lines: string[] = [];
-	lines.push(`${index + 1}. ${(result.title ?? "").trim() || "(untitled)"}`);
-	lines.push(`   ${result.url}`);
+	lines.push(`${index + 1}. ${text(result.title) || "(untitled)"}`);
+	lines.push(`   ${text(result.url)}`);
 
 	const meta: string[] = [];
-	if (result.site_name) meta.push(result.site_name);
-	if (result.date) meta.push(result.date.slice(0, 10));
-	if (typeof result.authority === "number") {
+	const siteName = text(result.site_name);
+	if (siteName) meta.push(siteName);
+	const date = text(result.date);
+	if (date) meta.push(date.slice(0, 10));
+	if (typeof result.authority === "number" && Number.isFinite(result.authority)) {
 		// Docs: 0-4, where -1 means the tier is unknown.
 		meta.push(result.authority < 0 ? "authority unknown" : `authority ${result.authority}/4`);
 	}
-	if (typeof result.rerank_score === "number") {
+	if (typeof result.rerank_score === "number" && Number.isFinite(result.rerank_score)) {
 		meta.push(`score ${result.rerank_score.toFixed(2)}${result.rerank_score >= 1.5 ? " (high quality)" : ""}`);
 	}
 	if (meta.length > 0) lines.push(`   ${meta.join(" · ")}`);
 
-	const body =
-		withContent && result.content && result.content.trim()
-			? result.content.trim()
-			: (result.summary ?? "").trim() || (result.snippet ?? "").trim();
+	const content = typeof result.content === "string" ? result.content.trim() : "";
+	const summary = typeof result.summary === "string" ? result.summary.trim() : "";
+	const snippet = typeof result.snippet === "string" ? result.snippet.trim() : "";
+	const body = withContent && content ? content : summary || snippet;
 	if (body) {
 		if (charLength(body) > MAX_RESULT_CONTENT_CHARS) {
 			const kept = Array.from(body).slice(0, MAX_RESULT_CONTENT_CHARS).join("");
@@ -386,7 +459,7 @@ const SEARCH_SCHEMA = {
 			type: "string",
 			minLength: 1,
 			description:
-				'Search query. Supports operators: "exact phrase", -word, -"phrase", site:a.com OR site:b.com, -site:c.com, lang:en,zh, after:2025-01-01, before:2026-06-01.',
+				'Search query. Supports operators: "exact phrase", -word, -"phrase", site:a.com OR site:b.com, -site:c.com, lang:en,zh, after:2025-01-01, before:2026-06-01. Queries are capped at 128 chars including operators; anything longer is trimmed automatically (filters shed first, then trailing words) and the removals are reported in the output — do not pre-shorten.',
 		},
 		count: {
 			type: "integer",
@@ -403,17 +476,19 @@ const SEARCH_SCHEMA = {
 		need_content: {
 			type: "boolean",
 			description:
-				"Return the full extracted text of each page instead of a summary. Same price per request; costs more context.",
+				"Return extracted page text instead of the short summary — up to 4,000 chars per result, with any truncation reported. Same price per request; uses more context.",
 		},
 		allowed_domains: {
 			type: "array",
 			items: { type: "string" },
-			description: "Restrict results to these domains (becomes site: OR site:).",
+			description:
+				"Restrict results to these domains (compiled into site: OR site:). Counts toward the 128-char query cap, so a long domain list can be dropped for very long queries — any drop is reported in the output.",
 		},
 		blocked_domains: {
 			type: "array",
 			items: { type: "string" },
-			description: "Exclude these domains (becomes -site:).",
+			description:
+				"Exclude these domains (compiled into -site:). Counts toward the 128-char query cap and may be dropped for very long queries; any drop is reported.",
 		},
 		lang: { type: "string", description: 'Language codes, e.g. "zh,en" (becomes lang:).' },
 		recency: {
@@ -423,7 +498,7 @@ const SEARCH_SCHEMA = {
 		},
 		localization: {
 			type: "string",
-			description: "Optional IP address used to localize results.",
+			description: "Optional IPv4/IPv6 literal used to localize results (e.g. 203.0.113.7); country codes are rejected.",
 		},
 	},
 	required: ["query"],
@@ -433,7 +508,11 @@ const SEARCH_SCHEMA = {
 const FETCH_SCHEMA = {
 	type: "object",
 	properties: {
-		url: { type: "string", description: "Absolute HTTP(S) URL to read as Markdown." },
+		url: {
+			type: "string",
+			description:
+				"Absolute public HTTP(S) URL to read as Markdown. Local and private addresses are refused.",
+		},
 		max_chars: {
 			type: "integer",
 			minimum: 500,
@@ -450,23 +529,39 @@ export default function (pi: any): void {
 		name: "deepseek_search",
 		label: "DeepSeek Search",
 		description:
-			"Search the live web with DeepSeek's own search engine (in-house index, reranked on relevance + authority + freshness). " +
-			"Returns title, URL, site, publication date, authority tier (0-4) and rerank score, plus a model-oriented summary or, with need_content, the full page text. " +
+			"Search the live web with DeepSeek's search engine (in-house index, reranked on relevance + authority + freshness). " +
+			"Returns title, URL, site, publication date, authority tier (0-4, or 'unknown') and rerank score, plus a model-oriented summary or, with need_content, extracted page text. " +
 			"Supports count (1-50), ori_question for ranking, domain/lang/date filters, and localization. " +
-			"Prefer this over a generic web_search when you need publication dates or DeepSeek's ranking; reserve it for when precision matters, since each call is billed per request.",
+			"Choose this instead of a generic web_search when the answer depends on when something was published, you need authoritative sources, you want 21-50 results, or you can pass the user's original question as ori_question. " +
+			"Search is billed per successful request ($0.00075); a query that returns nothing costs nothing.",
 		promptSnippet: "Search the web via DeepSeek's search engine (dates, authority, ori_question)",
 		parameters: SEARCH_SCHEMA,
-		async execute(_toolCallId: string, params: any, signal: AbortSignal | undefined, _onUpdate: unknown, ctx: any) {
+		async execute(
+			_toolCallId: string,
+			params: any = {},
+			signal: AbortSignal | undefined,
+			_onUpdate: unknown,
+			ctx: any,
+		) {
 			const rawCount = Number(params.count ?? 10);
+			const domains = (value: unknown): string[] =>
+				Array.isArray(value)
+					? value
+							.filter((entry): entry is string => typeof entry === "string")
+							.map((entry) => entry.trim())
+							.filter(Boolean)
+					: [];
+			const oriQuestion =
+				typeof params.ori_question === "string" && params.ori_question.trim()
+					? Array.from(params.ori_question.trim()).slice(0, MAX_ORI_QUESTION_CHARS).join("")
+					: undefined;
 			const options: SearchOptions = {
 				query: assertQueryText(String(params.query ?? "")),
 				count: Math.min(50, Math.max(1, Number.isFinite(rawCount) ? Math.floor(rawCount) : 10)),
 				need_content: params.need_content === true,
-				allowedDomains: Array.isArray(params.allowed_domains) ? params.allowed_domains : [],
-				blockedDomains: Array.isArray(params.blocked_domains) ? params.blocked_domains : [],
-				...(typeof params.ori_question === "string" && params.ori_question.trim()
-					? { ori_question: params.ori_question.trim().slice(0, MAX_ORI_QUESTION_CHARS) }
-					: {}),
+				allowedDomains: domains(params.allowed_domains),
+				blockedDomains: domains(params.blocked_domains),
+				...(oriQuestion ? { ori_question: oriQuestion } : {}),
 				...(typeof params.lang === "string" && params.lang.trim() ? { lang: params.lang.trim() } : {}),
 				...(params.recency ? { recency: params.recency } : {}),
 				...(typeof params.localization === "string" && params.localization.trim()
@@ -490,16 +585,23 @@ export default function (pi: any): void {
 				SEARCH_TIMEOUT_MS,
 			);
 
-			const results = (Array.isArray(data.results) ? data.results : []).filter(
+			// Docs: billable when the request returns HTTP 200 *and* a non-empty results
+			// array — so cost follows the raw array, not what survives client-side filtering.
+			const rawResults = Array.isArray(data?.results) ? data.results : [];
+			const results = rawResults.filter(
 				(entry) => typeof entry?.url === "string" && /^https?:\/\//i.test(entry.url),
 			);
+			const discarded = rawResults.length - results.length;
 
 			const header: string[] = [
 				`DeepSeek search · ${results.length} result${results.length === 1 ? "" : "s"}`,
 			];
 			header.push(`query: ${query}`);
 			if (options.ori_question) header.push(`ori_question: ${options.ori_question}`);
-			if (dropped.length > 0) header.push(`trimmed to fit 128 chars: ${dropped.join("; ")}`);
+			if (dropped.length > 0)
+				header.push(`trimmed to fit ${MAX_QUERY_CHARS} chars: ${dropped.join("; ")}`);
+			if (discarded > 0)
+				header.push(`discarded ${discarded} result${discarded === 1 ? "" : "s"} without an http(s) URL`);
 
 			const text =
 				results.length === 0
@@ -514,15 +616,17 @@ export default function (pi: any): void {
 					query,
 					dropped,
 					count: results.length,
+					discarded,
 					needContent: options.need_content,
-					estimatedCostUsd: results.length > 0 ? PRICE_PER_SUCCESSFUL_REQUEST_USD : 0,
+					estimatedCostUsd: rawResults.length > 0 ? PRICE_PER_SUCCESSFUL_REQUEST_USD : 0,
 					results: results.map((result) => ({
-						title: result.title ?? "",
+						title: typeof result.title === "string" ? result.title : "",
 						url: result.url,
-						site: result.site_name ?? null,
-						date: result.date ?? null,
-						authority: result.authority ?? null,
-						score: result.rerank_score ?? null,
+						site: typeof result.site_name === "string" ? result.site_name : null,
+						siteIcon: typeof result.site_icon === "string" ? result.site_icon : null,
+						date: typeof result.date === "string" ? result.date : null,
+						authority: typeof result.authority === "number" ? result.authority : null,
+						score: typeof result.rerank_score === "number" ? result.rerank_score : null,
 					})),
 				},
 			};
@@ -537,15 +641,21 @@ export default function (pi: any): void {
 			"Use after deepseek_search when a summary is not enough, or for a specific URL you already know.",
 		promptSnippet: "Fetch a URL as Markdown via DeepSeek (server-side rendering + extraction)",
 		parameters: FETCH_SCHEMA,
-		async execute(_toolCallId: string, params: any, signal: AbortSignal | undefined, _onUpdate: unknown, ctx: any) {
+		async execute(
+			_toolCallId: string,
+			params: any = {},
+			signal: AbortSignal | undefined,
+			_onUpdate: unknown,
+			ctx: any,
+		) {
 			const url = assertFetchableUrl(String(params.url ?? ""));
-			const maxChars = Math.min(
-				200_000,
-				Math.max(500, Number(params.max_chars ?? MAX_FETCH_CONTENT_CHARS) || MAX_FETCH_CONTENT_CHARS),
-			);
+			const requestedChars = Number(params.max_chars ?? MAX_FETCH_CONTENT_CHARS);
+			const requested = Number.isFinite(requestedChars) ? Math.floor(requestedChars) : MAX_FETCH_CONTENT_CHARS;
+			const maxChars = Math.min(200_000, Math.max(500, requested));
+			const clamped = maxChars !== requested;
 			const apiKey = await resolveApiKey(ctx);
 
-			const data = await postDeepSeek<{ title?: string; content?: string }>(
+			const data = await postDeepSeek<{ title?: unknown; content?: unknown }>(
 				"/v1/tools/fetch",
 				{ url: url.toString() },
 				apiKey,
@@ -553,8 +663,8 @@ export default function (pi: any): void {
 				FETCH_TIMEOUT_MS,
 			);
 
-			const title = typeof data.title === "string" ? data.title.trim() : "";
-			const content = typeof data.content === "string" ? cleanMarkdown(data.content).trim() : "";
+			const title = typeof data?.title === "string" ? data.title.trim() : "";
+			const content = typeof data?.content === "string" ? cleanMarkdown(data.content).trim() : "";
 			if (!content) {
 				throw new Error(`DeepSeek Fetch returned no usable content for ${url.toString()}`);
 			}
@@ -562,7 +672,7 @@ export default function (pi: any): void {
 			const total = charLength(content);
 			const body = total > maxChars ? Array.from(content).slice(0, maxChars).join("") : content;
 			const text = [
-				`DeepSeek fetch · ${total} chars${total > maxChars ? ` (truncated to ${maxChars})` : ""}`,
+				`DeepSeek fetch · ${total} chars${total > maxChars ? ` (truncated to ${maxChars})` : ""}${clamped ? ` (max_chars clamped to ${maxChars})` : ""}`,
 				title ? `title: ${title}` : "",
 				url.toString(),
 				"",
@@ -577,6 +687,7 @@ export default function (pi: any): void {
 					url: url.toString(),
 					title,
 					chars: total,
+					maxChars,
 					truncated: total > maxChars,
 					estimatedCostUsd: PRICE_PER_SUCCESSFUL_REQUEST_USD,
 				},

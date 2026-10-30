@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import extension, {
 	assertFetchableUrl,
+	baseUrl,
 	assertLocalization,
 	assertQueryText,
 	cleanMarkdown,
@@ -54,10 +55,10 @@ test("fitQuery: sheds filters before words, and reports each removal", () => {
 		}),
 	);
 	assert.ok(chars(built) <= MAX_QUERY_CHARS, `built query is ${chars(built)} chars`);
-	assert.ok(dropped.some((d) => d.startsWith("recency (")));
-	assert.ok(dropped.some((d) => d.startsWith("language (")));
-	assert.ok(dropped.some((d) => d.startsWith("domain filter (")));
-	assert.ok(dropped.includes("trailing query words"));
+	const order = ["recency (", "language (", "domain filter (", "trailing query words"];
+	const positions = order.map((prefix) => dropped.findIndex((d) => d.startsWith(prefix) || d === prefix));
+	assert.ok(positions.every((position) => position >= 0), `missing drop: ${JSON.stringify(dropped)}`);
+	assert.deepEqual([...positions].sort((a, b) => a - b), positions, "drops must follow recency → language → domains → words");
 	// The surviving text keeps the original word order and never gains new words.
 	assert.ok(query.startsWith(built.split(" site:")[0]!.slice(0, 40)));
 });
@@ -284,7 +285,7 @@ test("deepseek_search: retries 429 and honours retry-after: 0", async () => {
 });
 
 test("deepseek_search: does not retry documented non-retryable statuses", async () => {
-	for (const status of [400, 401, 402, 403, 404, 413, 425]) {
+	for (const status of [400, 401, 402, 403, 404, 413]) {
 		const { search, ctx } = harness();
 		const stub = stubFetch(() => json({ error: { message: "nope" } }, status));
 		try {
@@ -402,6 +403,261 @@ test("deepseek_fetch: surfaces the documented 403 security-policy hint", async (
 			() => fetch.execute("t", { url: "https://ex.com/doc" }, undefined, undefined, ctx),
 			/security policy/,
 		);
+	} finally {
+		stub.restore();
+	}
+});
+
+/* ------------------------------------------- regression tests for review fixes */
+
+test("assertFetchableUrl: trailing dots and IPv4-mapped IPv6 cannot bypass the guard", () => {
+	for (const url of [
+		"http://localhost./x",
+		"http://app.localhost./x",
+		"http://[::ffff:127.0.0.1]/x",
+		"http://[::ffff:10.1.2.3]/x",
+		"http://[::ffff:7f00:1]/x",
+		"http://[::ffff:a9fe:a9fe]/x",
+		"http://[::127.0.0.1]/x",
+		"http://[::]/x",
+		"http://[fc00::1]/x",
+		"http://[fe80::1]/x",
+		"http://100.64.1.1/x",
+		"http://198.18.0.1/x",
+		"http://127.1/x",
+		"http://2130706433/x",
+		"http://0x7f.1/x",
+	]) {
+		assert.throws(() => assertFetchableUrl(url), /local or private/, url);
+	}
+	// Same encodings for public addresses must still pass.
+	assert.equal(assertFetchableUrl("http://[::ffff:8.8.8.8]/x").protocol, "http:");
+	assert.equal(assertFetchableUrl("http://172.32.0.1/x").hostname, "172.32.0.1");
+	assert.equal(assertFetchableUrl("http://100.128.0.1/x").hostname, "100.128.0.1");
+});
+
+test("fitQuery: an unknown recency is a clear error, not a RangeError", () => {
+	assert.throws(
+		() =>
+			fitQuery({
+				...base(),
+				recency: "yesterday" as any,
+			}),
+		/recency must be one of day, week, month, year/,
+	);
+});
+
+test("formatResult: non-string fields degrade instead of throwing", () => {
+	const result = {
+		url: "https://ex.com/a",
+		title: 123 as any,
+		date: 20261030 as any,
+		summary: { text: "x" } as any,
+		snippet: [] as any,
+		authority: "3" as any,
+		rerank_score: Number.NaN,
+	};
+	const text = formatResult(result, 0, false);
+	assert.match(text, /^1\. \(untitled\)/);
+	assert.equal(text.split("\n").length, 2, "only title and url lines survive");
+});
+
+test("cleanMarkdown: fences indented inside list items are protected", () => {
+	assert.equal(
+		cleanMarkdown("* item\n\n    ```\n    code\\.x\n    ```\n"),
+		"* item\n\n    ```\n    code\\.x\n    ```\n",
+	);
+	assert.equal(cleanMarkdown("\t~~~\n\tcode\\.x\n\t~~~\n"), "\t~~~\n\tcode\\.x\n\t~~~\n");
+});
+
+test("fitQuery: caller spacing is preserved when the query fits", () => {
+	const { query, dropped } = fitQuery(base({ query: "a   b\tc" }));
+	assert.equal(query, "a   b\tc");
+	assert.deepEqual(dropped, []);
+});
+
+test("deepseek_search: ori_question is cut by code point, never mid surrogate pair", async () => {
+	const { search, ctx } = harness();
+	const stub = stubFetch(() => json({ results: [] }));
+	try {
+		await search.execute("t", { query: "q", ori_question: "a" + "\u{1F600}".repeat(200) }, undefined, undefined, ctx);
+		const sent = stub.calls[0]!.body.ori_question as string;
+		assert.ok(Array.from(sent).length <= 128, `ori_question is ${Array.from(sent).length} code points`);
+		assert.doesNotMatch(sent, /[\uD800-\uDBFF]$/, "must not end on a lone high surrogate");
+	} finally {
+		stub.restore();
+	}
+});
+
+test("deepseek_search: every documented 5xx is retried, not a closed subset", async () => {
+	for (const status of [408, 429, 500, 501, 502, 503, 504, 505]) {
+		const { search, ctx } = harness();
+		const stub = stubFetch((_url, _init, call) =>
+			call === 1 ? json({ error: { message: "later" } }, status, { "retry-after": "0" }) : json({ results: [] }),
+		);
+		try {
+			await search.execute("t", { query: "q" }, undefined, undefined, ctx);
+			assert.equal(stub.calls.length, 2, `HTTP ${status} must be retried`);
+		} finally {
+			stub.restore();
+		}
+	}
+});
+
+test("deepseek_search: undocumented 425 is not retried", async () => {
+	const { search, ctx } = harness();
+	const stub = stubFetch(() => json({ error: { message: "too early" } }, 425));
+	try {
+		await assert.rejects(() => search.execute("t", { query: "q" }, undefined, undefined, ctx), /HTTP 425/);
+		assert.equal(stub.calls.length, 1);
+	} finally {
+		stub.restore();
+	}
+});
+
+test("deepseek_search: cost follows the raw result array, not client-side filtering", async () => {
+	const { search, ctx } = harness();
+	const stub = stubFetch(() =>
+		json({ results: [{ title: "a", url: "ftp://ex.com/a" }, { title: "b", url: "mailto:x@y.z" }] }),
+	);
+	try {
+		const result = await search.execute("t", { query: "q" }, undefined, undefined, ctx);
+		assert.equal(result.details.count, 0);
+		assert.equal(result.details.discarded, 2);
+		assert.equal(result.details.estimatedCostUsd, PRICE_PER_SUCCESSFUL_REQUEST_USD);
+		assert.match(result.content[0].text, /discarded 2 results without an http\(s\) URL/);
+	} finally {
+		stub.restore();
+	}
+});
+
+test("deepseek_search: site_icon is surfaced in details", async () => {
+	const { search, ctx } = harness();
+	const stub = stubFetch(() =>
+		json({ results: [{ title: "a", url: "https://ex.com", site_icon: "https://ex.com/f.ico" }] }),
+	);
+	try {
+		const result = await search.execute("t", { query: "q" }, undefined, undefined, ctx);
+		assert.equal(result.details.results[0].siteIcon, "https://ex.com/f.ico");
+	} finally {
+		stub.restore();
+	}
+});
+
+test("deepseek_search: non-string domain entries are dropped, not stringified into the query", async () => {
+	const { search, ctx } = harness();
+	const stub = stubFetch(() => json({ results: [] }));
+	try {
+		await search.execute(
+			"t",
+			{ query: "q", allowed_domains: [" ok.example ", 42, {}, null] },
+			undefined,
+			undefined,
+			ctx,
+		);
+		assert.equal(stub.calls[0]!.body.query, "q site:ok.example");
+	} finally {
+		stub.restore();
+	}
+});
+
+test("baseUrl: PI_DEEPSEEK_BASE_URL wins and /v1 plus trailing slashes are stripped", () => {
+	const original = { ...process.env };
+	try {
+		process.env.PI_DEEPSEEK_BASE_URL = "https://gateway.example.com/ds/v1/";
+		process.env.DEEPSEEK_SEARCH_BASE_URL = "https://ignored.example.com";
+		assert.equal(baseUrl(), "https://gateway.example.com/ds");
+		delete process.env.PI_DEEPSEEK_BASE_URL;
+		assert.equal(baseUrl(), "https://ignored.example.com");
+		delete process.env.DEEPSEEK_SEARCH_BASE_URL;
+		process.env.DEEPSEEK_BASE_URL = "https://must-be-ignored.example.com";
+		assert.equal(baseUrl(), "https://api.deepseek.com");
+	} finally {
+		for (const key of ["PI_DEEPSEEK_BASE_URL", "DEEPSEEK_SEARCH_BASE_URL", "DEEPSEEK_BASE_URL"]) {
+			if (original[key] === undefined) delete process.env[key];
+			else process.env[key] = original[key];
+		}
+	}
+});
+
+test("deepseek_search: an HTTP-date retry-after is honoured", async () => {
+	const { search, ctx } = harness();
+	const started = Date.now();
+	const stub = stubFetch((_url, _init, call) =>
+		call === 1
+			? json({ error: { message: "slow down" } }, 429, {
+					"retry-after": new Date(Date.now() - 30_000).toUTCString(),
+				})
+			: json({ results: [] }),
+	);
+	try {
+		await search.execute("t", { query: "q" }, undefined, undefined, ctx);
+		assert.equal(stub.calls.length, 2);
+		assert.ok(Date.now() - started < 2_000, "a past HTTP-date must not stall");
+	} finally {
+		stub.restore();
+	}
+});
+
+test("deepseek_search: a 200 with a non-JSON body is a clear, non-retried error", async () => {
+	const { search, ctx } = harness();
+	let calls = 0;
+	const original = globalThis.fetch;
+	globalThis.fetch = (async () => {
+		calls++;
+		return new Response("<html>nope</html>", { status: 200, headers: { "content-type": "text/html" } });
+	}) as any;
+	try {
+		await assert.rejects(
+			() => search.execute("t", { query: "q" }, undefined, undefined, ctx),
+			/returned invalid JSON/,
+		);
+		assert.equal(calls, 1);
+	} finally {
+		globalThis.fetch = original;
+	}
+});
+
+test("deepseek_search: network failures are retried, then surface the failure", async () => {
+	const { search, ctx } = harness();
+	let calls = 0;
+	const original = globalThis.fetch;
+	globalThis.fetch = (async () => {
+		calls++;
+		throw new TypeError("fetch failed");
+	}) as any;
+	try {
+		await assert.rejects(
+			() => search.execute("t", { query: "q" }, undefined, undefined, ctx),
+			/request failed: fetch failed/,
+		);
+		assert.equal(calls, 3);
+	} finally {
+		globalThis.fetch = original;
+	}
+});
+
+test("deepseek_search: an already-aborted signal makes no request", async () => {
+	const { search, ctx } = harness();
+	const stub = stubFetch(() => json({ results: [] }));
+	try {
+		await assert.rejects(
+			() => search.execute("t", { query: "q" }, AbortSignal.abort(), undefined, ctx),
+			/Aborted/,
+		);
+		assert.equal(stub.calls.length, 0);
+	} finally {
+		stub.restore();
+	}
+});
+
+test("deepseek_fetch: a clamped max_chars is reported", async () => {
+	const { fetch, ctx } = harness();
+	const stub = stubFetch(() => json({ title: "t", content: "abc" }));
+	try {
+		const result = await fetch.execute("t", { url: "https://ex.com/d", max_chars: 10 }, undefined, undefined, ctx);
+		assert.equal(result.details.maxChars, 500);
+		assert.match(result.content[0].text, /max_chars clamped to 500/);
 	} finally {
 		stub.restore();
 	}

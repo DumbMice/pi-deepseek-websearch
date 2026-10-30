@@ -2,19 +2,22 @@
 
 DeepSeek **Search** and **Fetch** API tools for the [pi coding agent](https://pi.dev) — direct access to the fields and parameters that generic web-search wrappers throw away.
 
-Two tools, no dependencies, and it **coexists with `pi-web-access`** (different tool names, no config keys of its own).
+Two tools, no dependencies, and it **coexists with `pi-web-access`**: different tool names, no config keys of its own, no settings to migrate.
 
 ```text
-deepseek_search  "DeepSeek-V4-Pro GA Release | DeepSeek API Docs"
-                 https://api-docs.deepseek.com/news/news260813/
-                 DeepSeek · 2026-08-12 · authority 3/4 · score 2.58 (high quality)
-                 # DeepSeek-V4-Pro GA Release
-                 We're launching DeepSeek-V4-Pro today! …
+DeepSeek search · 2 results                       ← abridged: the real output lists every field
+query: DeepSeek V4 Pro release
+
+1. DeepSeek-V4-Pro GA Release | DeepSeek API Docs
+   https://api-docs.deepseek.com/news/news260813/
+   DeepSeek · 2026-08-12 · authority 3/4 · score 2.58 (high quality)
+   # DeepSeek-V4-Pro GA Release
+   We're launching DeepSeek-V4-Pro today! …
 ```
 
 ## Why
 
-`pi-web-access` maps DeepSeek's Search API onto its generic provider interface. That is the right shape for a 40-provider router, but it loses what makes DeepSeek's API useful:
+`pi-web-access` maps DeepSeek's Search API onto its generic provider interface (compared against `pi-web-access@0.44.0`, verified 2026-10-30). That is the right shape for a 40-provider router, but it loses what makes DeepSeek's API useful:
 
 | | `pi-web-access` DeepSeek provider | this extension |
 |---|---|---|
@@ -31,17 +34,19 @@ Use it when you need DeepSeek's ranking, publication dates, or a specific `count
 ## Install
 
 ```bash
+# from npm, once the package is published
 pi install npm:pi-deepseek-api
 
-# or straight from a repo / working copy
-pi install git:github.com/<you>/pi-deepseek-api
+# from a working copy (works today, no publish required)
 pi install /absolute/path/to/pi-deepseek-api
 
 # try it for one session
-pi -e npm:pi-deepseek-api
+pi -e /absolute/path/to/pi-deepseek-api
 ```
 
-> If you previously installed a single-file copy of this extension in `~/.pi/agent/extensions/`, remove it first — two copies would register `deepseek_search` twice.
+If you previously installed a single-file copy of this extension in `~/.pi/agent/extensions/`, remove it first — two copies would register `deepseek_search` twice. `pi-web-access` itself needs no change.
+
+Confirm it registered: start `pi`, ask *"use deepseek_search to look up the DeepSeek API pricing"*, and you should see a `DeepSeek search · N results` header. Or check the tool list in your session.
 
 ## Credentials
 
@@ -50,7 +55,7 @@ The extension uses, in order:
 1. pi's `deepseek` provider credentials (`ctx.modelRegistry.getApiKeyForProvider("deepseek")`) — i.e. `/login` or `auth.json`;
 2. `DEEPSEEK_API_KEY`.
 
-Endpoint override: `PI_DEEPSEEK_BASE_URL`, then `DEEPSEEK_SEARCH_BASE_URL` (default `https://api.deepseek.com`). The bare `DEEPSEEK_BASE_URL` is deliberately ignored: other tools commonly set it to an OpenAI-compatible `/v1` root.
+Endpoint override: `PI_DEEPSEEK_BASE_URL`, then `DEEPSEEK_SEARCH_BASE_URL` (default `https://api.deepseek.com`; a trailing slash or `/v1` suffix is stripped). The bare `DEEPSEEK_BASE_URL` is deliberately ignored: other tools commonly set it to an OpenAI-compatible `/v1` root.
 
 Get a key at <https://platform.deepseek.com/api_keys>.
 
@@ -60,62 +65,78 @@ Get a key at <https://platform.deepseek.com/api_keys>.
 
 | Parameter | Type | Notes |
 |---|---|---|
-| `query` | string, required | 1–128 Unicode chars. Operators pass through: `"exact phrase"`, `-word`, `-"phrase"`, `site:a OR site:b`, `-site:c`, `lang:en,zh`, `after:2025-01-01`, `before:2026-06-01` |
+| `query` | string, required | Operators pass through: `"exact phrase"`, `-word`, `-"phrase"`, `site:a OR site:b`, `-site:c`, `lang:en,zh`, `after:2025-01-01`, `before:2026-06-01`. Capped at 128 chars; longer queries are trimmed (see below) rather than rejected |
 | `count` | integer 1–50 | default 10; the per-request price does not depend on it |
 | `ori_question` | string ≤128 | your original question verbatim; improves query understanding and ranking |
-| `need_content` | boolean | return full extracted page text instead of `summary`; same price, more context |
-| `allowed_domains` | string[] | compiled to `site:` clauses joined with `OR` |
-| `blocked_domains` | string[] | compiled to `-site:` clauses |
+| `need_content` | boolean | return extracted page text instead of the `summary`, capped at 4,000 chars per result with truncation reported; same price, more context |
+| `allowed_domains` | string[] | compiled to `site:` clauses joined with `OR`; counts toward the 128-char cap |
+| `blocked_domains` | string[] | compiled to `-site:` clauses; counts toward the cap |
 | `lang` | string | e.g. `"zh,en"` → `lang:zh,en` |
 | `recency` | `day`\|`week`\|`month`\|`year` | compiled to `after:<date>` |
-| `localization` | string | IP address used to localize results |
+| `localization` | string | IPv4/IPv6 literal used to localize results; anything else is rejected |
 
-Results carry title, URL, site, publication date, authority tier (`0–4`, `-1` rendered as *unknown*), rerank score (`≥1.5` annotated as high quality), and either the model-oriented `summary` or the full text. `details.estimatedCostUsd` reports $0.00075 for a billed call and $0 for an empty result set.
+Each result carries title, URL, site, publication date, authority tier (`0–4`; the API's `-1` renders as *authority unknown*), and rerank score (`≥1.5` annotated as high quality), plus the model-oriented `summary` or the extracted page text. `site_icon` is not rendered but is included in `details`.
+
+`details` also reports: the final `query`, `dropped` (anything trimmed), `count`, `discarded` (results without an `http(s)` URL), and `estimatedCostUsd`.
 
 ### `deepseek_fetch`
 
 | Parameter | Type | Notes |
 |---|---|---|
-| `url` | string, required | absolute HTTP(S), ≤8192 chars, no credentials |
-| `max_chars` | integer 500–200000 | default 20000; truncation is reported with the true length |
+| `url` | string, required | absolute public HTTP(S), ≤8192 chars, no credentials; local/private targets are refused |
+| `max_chars` | integer 500–200000 | default 20000; truncation and clamping are both reported |
 
-Returns the page as Markdown, rendered and extracted server-side.
+Returns the page as Markdown, rendered and extracted server-side. A page with no extractable content is an error rather than an empty success.
 
 ## Behaviour worth knowing
 
-- **The 128-character limit is real** and counts `site:`, `lang:` and `after:` operators. Instead of failing, the extension sheds filters first (recency → language → domains), then trailing words, and prints `trimmed to fit 128 chars: …` so the request is never silently different from what you asked for.
-- **Retries** cover `408`, `429`, `500`, `502`, `503`, `504` plus network failures and timeouts, up to 3 attempts, honouring `retry-after`. Documented non-retryable statuses (`400`, `401`, `402`, `403`, `404`, `413`) fail immediately with an actionable hint (top up, fix the key, security policy, no usable content, rate limits).
-- **Billing**: `$0.75 per 1,000 successful requests` for both Search and Fetch. Failed calls, empty search results, and timeouts are not billed. `count` does not affect price.
-- **Limits**: 100 QPS search, 25 QPS fetch per account, plus a per-domain fetch limit.
+- **The 128-character limit is real** and includes `site:`, `lang:` and `after:` operators. When the query fits, it is sent exactly as written, spacing included. Only an over-long query is rewritten, and then filters are shed first (recency → language → domains), then trailing words, then — only if a single token exceeds the whole budget — the tail is cut. Every change is printed as `trimmed to fit 128 chars: …`, so the request is never silently different from what you asked for.
+- **Retries** cover `408`, `429` and **any** `5xx` — the documented "wait and retry" set — plus network failures and timeouts, up to 3 attempts. `retry-after` is honoured in seconds or HTTP-date form, capped at 5 s. Every other `4xx` fails immediately.
+- **Hints** accompany `401` (key), `402` (top up), `403`/`404` on Fetch (security policy, no usable content), `413` (body too large) and `429` (rate limits); `400` surfaces the API's own message.
+- **Billing**: $0.75 per 1,000 successful requests for both Search and Fetch (<https://api-docs.deepseek.com/guides/search#billing>). A request is billable when it returns HTTP 200 **and** a non-empty result, so `estimatedCostUsd` follows the raw result array even if every URL is later discarded. Failed calls, empty search results and timeouts are free. `count` does not affect price.
+- **Limits**: 100 QPS search, 25 QPS fetch per account, plus a per-domain fetch limit (<https://api-docs.deepseek.com/guides/search#rate-limits>).
 - **Empty is not an error**: a search with no matches returns a normal "No results" answer and costs nothing.
 
 ## Safety
 
 - The API key is redacted from every error message before it reaches the model or the transcript.
-- `deepseek_fetch` refuses `localhost`, `127/8`, `10/8`, `172.16/12`, `192.168/16`, `169.254/16`, `0/8`, `::1`, `fc00::/7` and `fe80::/10`. DeepSeek fetches pages server-side, so this is a policy choice about not handing intranet URLs to a third party — remove the guard if you need it to read internal docs.
-- Markdown unescaping of Fetch output (DeepSeek escapes punctuation that was already plain text) never touches fenced blocks or inline code spans.
+- `deepseek_fetch` refuses `localhost` and `*.localhost` (including trailing-dot forms), IPv4 loopback/private/CGNAT/link-local/benchmarking ranges, `::`, `::1`, `fc00::/7`, `fe80::/10`, and IPv4-mapped IPv6 forms such as `::ffff:127.0.0.1`.
+- This is a **policy** choice, not a docs requirement: DeepSeek fetches pages server-side, so the guard exists to avoid handing intranet URLs to a third party. It matches literal addresses and localhost names only — a public hostname that resolves to a private address is not caught, because no DNS lookup is performed.
+- Markdown unescaping of Fetch output (DeepSeek escapes punctuation that was already plain text) never touches fenced blocks — including fences indented inside list items — or inline code spans.
 
 ## Docs alignment
 
-Validated against <https://api-docs.deepseek.com/guides/search>, `/api/search` and `/api/fetch` on **2026-10-30** (`DOCS_SNAPSHOT` in `src/index.ts`). Deliberate deviations, all visible in the tool output:
+Validated against <https://api-docs.deepseek.com/guides/search>, `/api/search` and `/api/fetch` on **2026-10-30** (`DOCS_SNAPSHOT` in `src/index.ts`). The wire contract is followed exactly: endpoints, auth headers, request fields and defaults, response field semantics, price, QPS and the documented error taxonomy.
 
-1. over-length queries are trimmed rather than rejected (and the trimming is reported);
-2. `need_content` text is capped at 4,000 chars per result (context economy; the true length is printed);
-3. `deepseek_fetch` blocks private addresses (docs impose no such rule);
-4. Fetch Markdown is unescaped heuristically (docs only promise Markdown);
-5. `date` is displayed as `YYYY-MM-DD` while the API returns RFC 3339 — the full timestamp stays in `details`;
-6. network failures and timeouts are retried beyond the documented `408/429/5xx` list (they are unbilled).
+Client-side deviations, all visible in tool output or `details`:
+
+1. over-length queries are trimmed rather than rejected, and the trimming is reported;
+2. caller spacing is normalised only when a query has to be rewritten (never otherwise);
+3. result body text (extracted content, else `summary`, else `snippet`) is capped at 4,000 chars per result; the true length is printed;
+4. `count` is clamped to 1–50 instead of the API returning 400;
+5. results without an `http(s)` URL are discarded defensively — the count is reported and the price still reflects the raw response;
+6. `site_icon` is surfaced in `details` but not rendered;
+7. `deepseek_fetch` blocks local/private addresses (docs impose no such rule);
+8. Fetch Markdown is unescaped heuristically (docs only promise Markdown);
+9. `max_chars` truncates Fetch output and clamps out-of-range values, both reported;
+10. a 200 response with empty Fetch content is treated as an error (docs route empty extraction to 404);
+11. `date` is displayed as `YYYY-MM-DD` while the API returns RFC 3339 — the full timestamp stays in `details`;
+12. network failures and timeouts are retried beyond the documented `408/429/5xx` list (they are unbilled);
+13. `retry-after` support is an inference — the docs never mention the header — and the delay is capped at 5 s.
 
 If DeepSeek changes the API, bump `DOCS_SNAPSHOT` and update the affected tests.
 
 ## Development
 
+Requires Node >= 22.6 (the test runner uses `--experimental-strip-types`).
+
 ```bash
-npm test          # node:test, 28 tests, mocked HTTP — no API key or network needed
-npm run pack:check
+npm test              # node:test, 45 tests, mocked HTTP — no API key or network needed
+npm run typecheck     # tsc --noEmit, strict
+npm run pack:check    # tarball contents (no tests, no devDependencies)
 ```
 
-The suite covers query trimming order and the 128 cap, documented validation rules, metadata rendering (`authority: -1`, score annotation, summary/snippet/content precedence), retry classification per status, key redaction, URL safety, and both tool call shapes.
+The suite covers query trimming order and the 128 cap, caller-spacing preservation, documented validation rules, metadata rendering (`authority: -1`, score annotation, summary/snippet/content precedence, malformed fields), retry classification for every documented status, key redaction, URL safety including encoding bypasses, abort handling, and both tool call shapes.
 
 ## License
 
