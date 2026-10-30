@@ -165,6 +165,18 @@ npm run pack:check    # tarball contents (no tests, no devDependencies)
 
 The suite covers query trimming order and the 128 cap, caller-spacing preservation, documented validation rules, metadata rendering (`authority: -1`, score annotation, summary/snippet/content precedence, malformed fields), retry classification for every documented status, key redaction, URL safety including encoding bypasses, abort handling, and both tool call shapes.
 
+## Releasing
+
+Versions are published from CI with npm [trusted publishing](https://docs.npmjs.com/trusted-publishers)
+(OIDC, no long-lived token, provenance attached):
+
+```bash
+npm version patch --no-git-tag-version   # or minor/major
+git commit -am "chore: release v$(node -p "require('./package.json').version")"
+git tag "v$(node -p "require('./package.json').version")"
+git push origin main --follow-tags        # .github/workflows/publish.yml runs test + typecheck, then publishes
+```
+
 ## License
 
 MIT. Issues and source: <https://github.com/DumbMice/pi-deepseek-websearch>.
