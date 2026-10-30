@@ -5,7 +5,7 @@ DeepSeek **Search** and **Fetch** API tools for the [pi coding agent](https://pi
 Two tools, no dependencies, and it **coexists with `pi-web-access`**: different tool names, no web-search.json keys of its own, no settings to migrate.
 
 ```text
-DeepSeek search · 2 results                       ← abridged; each result also carries site, date, authority and score
+DeepSeek search · 2 results     ← abridged
 query: DeepSeek V4 Pro release
 
 1. DeepSeek-V4-Pro GA Release | DeepSeek API Docs
@@ -14,6 +14,8 @@ query: DeepSeek V4 Pro release
    # DeepSeek-V4-Pro GA Release
    We're launching DeepSeek-V4-Pro today! …
 ```
+
+Every result also carries site, publication date, authority tier and rerank score; `details` holds the full set.
 
 ## Why
 
@@ -34,7 +36,7 @@ Use it when you need DeepSeek's ranking, publication dates, or a specific `count
 ## Install
 
 ```bash
-# from npm, once the package is published
+# from npm
 pi install npm:@dumbmice/pi-deepseek-websearch
 
 # straight from GitHub

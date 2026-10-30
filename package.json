@@ -1,6 +1,6 @@
 {
   "name": "@dumbmice/pi-deepseek-websearch",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Web search and page fetch for pi via DeepSeek's Search & Fetch APIs: publication dates, authority, rerank score, ori_question, count up to 50, and graceful 128-char handling. Coexists with pi-web-access.",
   "type": "module",
   "license": "MIT",

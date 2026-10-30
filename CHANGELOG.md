@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.1 — 2026-10-30
+
+Documentation-only release: npm snapshots the README at publish time, so this
+republishes the corrected text.
+
+- Install command moved directly under the intro and no longer says "once the
+  package is published".
+- The sample-output block no longer overflows horizontally; the per-result
+  fields it used to cram into a comment are described in the prose below it.
+
 ## 0.1.0 — 2026-10-30
 
 First release. Package name: `@dumbmice/pi-deepseek-websearch` (web search and page fetch over
