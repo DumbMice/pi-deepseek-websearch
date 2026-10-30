@@ -1,0 +1,43 @@
+{
+  "name": "pi-deepseek-api",
+  "version": "0.1.0",
+  "description": "DeepSeek Search & Fetch API tools for pi: publication dates, authority, rerank score, ori_question, count up to 50, and graceful 128-char handling. Coexists with pi-web-access.",
+  "type": "module",
+  "license": "MIT",
+  "author": {
+    "name": "yangbangcheng",
+    "email": "bangchengyang@hotmail.com"
+  },
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "pi-coding-agent",
+    "pi",
+    "deepseek",
+    "web-search",
+    "web-fetch",
+    "search-api",
+    "llm-tools"
+  ],
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --no-warnings --test test/index.test.ts",
+    "pack:check": "npm pack --dry-run"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {},
+  "peerDependencies": {},
+  "peerDependenciesMeta": {}
+}
