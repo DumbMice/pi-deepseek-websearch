@@ -792,3 +792,102 @@ test("deepseek_search: null and scalar results are counted as discarded, not ren
 		stub.restore();
 	}
 });
+
+/* --------------------------------------- round-3 review regressions and gaps */
+
+test("fitQuery: the code-point tail cut cannot leave an unbalanced quote", () => {
+	const { query, dropped } = fitQuery({ ...base(), query: '"' + "a".repeat(300) + '"' });
+	assert.equal(Array.from(query).length <= MAX_QUERY_CHARS, true);
+	assert.equal((query.match(/"/g) ?? []).length % 2, 0, `unbalanced quotes in ${JSON.stringify(query.slice(0, 20))}…`);
+	assert.ok(dropped.includes("query tail"));
+});
+
+test("fitQuery: whitespace inside a retained quoted phrase is not reported as normalised", () => {
+	const { query, dropped } = fitQuery({ ...base(), query: '"a\tb" ' + "word ".repeat(30).trim() });
+	assert.ok(query.includes('"a\tb"'), "quoted phrase should survive intact");
+	assert.ok(!dropped.includes("query whitespace normalised"), JSON.stringify(dropped));
+});
+
+test("assertFetchableUrl: public NAT64 and out-of-prefix forms stay allowed", () => {
+	assert.ok(assertFetchableUrl("http://[64:ff9b::8.8.8.8]/x"));
+	assert.ok(assertFetchableUrl("http://[64:ff9b::1:7f00:1]/x"), "outside 64:ff9b::/96");
+});
+
+test("assertFetchableUrl: a URL that only exceeds 8192 after normalisation is rejected", () => {
+	const raw = "https://" + "中".repeat(63) + ".example/" + "a".repeat(8110);
+	assert.ok([...raw].length <= 8192, "raw input is within the limit");
+	assert.throws(() => assertFetchableUrl(raw), /8192 characters/);
+});
+
+test("deepseek_search: a custom abort reason survives the retry backoff", async () => {
+	const { search, ctx } = harness();
+	const original = globalThis.fetch;
+	globalThis.fetch = (async () => {
+		throw new TypeError("fetch failed");
+	}) as any;
+	const controller = new AbortController();
+	try {
+		const pending = search.execute("t", { query: "q" }, controller.signal, undefined, ctx);
+		setTimeout(() => controller.abort(new Error("user cancelled")), 50);
+		await assert.rejects(pending, (e: Error) => e.message === "user cancelled");
+	} finally {
+		globalThis.fetch = original;
+	}
+});
+
+test("deepseek_search: an immediate abort preserves the caller's reason", async () => {
+	const { search, ctx } = harness();
+	await assert.rejects(
+		() => search.execute("t", { query: "q" }, AbortSignal.abort(new Error("stop now")), undefined, ctx),
+		(e: Error) => e.message === "stop now",
+	);
+});
+
+test("deepseek_search: a 200 without a results array is an invalid response, not 'No results'", async () => {
+	const { search, ctx } = harness();
+	for (const body of [{}, { results: "nope" }, { results: null }]) {
+		const stub = stubFetch(() => json(body));
+		try {
+			await assert.rejects(
+				() => search.execute("t", { query: "q" }, undefined, undefined, ctx),
+				/expected a results array/,
+			);
+		} finally {
+			stub.restore();
+		}
+	}
+});
+
+test("deepseek_search: requestedCount reports the pre-clamp ask", async () => {
+	const { search, ctx } = harness();
+	const stub = stubFetch(() => json({ results: [] }));
+	try {
+		const high = await search.execute("t", { query: "q", count: 500 }, undefined, undefined, ctx);
+		assert.equal(high.details.requestedCount, 500);
+		const low = await search.execute("t", { query: "q", count: 0 }, undefined, undefined, ctx);
+		assert.equal(low.details.requestedCount, 0);
+		const bad = await search.execute("t", { query: "q", count: "abc" }, undefined, undefined, ctx);
+		assert.equal(bad.details.requestedCount, 10);
+	} finally {
+		stub.restore();
+	}
+});
+
+test("deepseek_search: an over-long ori_question is no longer schema-rejected before the cut", async () => {
+	// the runtime cut is authoritative: no maxLength in the schema, truncation reported
+	const { search, ctx } = harness();
+	const stub = stubFetch(() => json({ results: [] }));
+	try {
+		const result = await search.execute(
+			"t",
+			{ query: "q", ori_question: "😀".repeat(300) },
+			undefined,
+			undefined,
+			ctx,
+		);
+		assert.equal(result.details.oriQuestionTruncated, true);
+		assert.equal(Array.from(stub.calls[0]!.body.ori_question).length, 128);
+	} finally {
+		stub.restore();
+	}
+});

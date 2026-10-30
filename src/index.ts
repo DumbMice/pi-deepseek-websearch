@@ -150,14 +150,14 @@ function abortError(signal: AbortSignal): Error {
 
 const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
 	new Promise((resolve, reject) => {
-		if (signal?.aborted) return reject(new Error("Aborted"));
+		if (signal?.aborted) return reject(abortError(signal));
 		const timer = setTimeout(() => {
 			signal?.removeEventListener("abort", onAbort);
 			resolve();
 		}, ms);
 		const onAbort = () => {
 			clearTimeout(timer);
-			reject(new Error("Aborted"));
+			reject(abortError(signal!));
 		};
 		signal?.addEventListener("abort", onAbort, { once: true });
 	});
@@ -268,7 +268,7 @@ export function fitQuery(options: SearchOptions): { query: string; dropped: stri
 	const matchedTokens = raw.match(/"[^"]*"|\S+/g);
 	const tokens: string[] = matchedTokens ? [...matchedTokens] : [raw];
 	const quotesWereBalanced = ((raw.match(/"/g) ?? []).length % 2) === 0;
-	if (raw !== tokens.join(" ") || /[\t\n\r\f\v]/.test(raw)) dropped.push("query whitespace normalised");
+	if (raw !== tokens.join(" ")) dropped.push("query whitespace normalised");
 	let words = tokens;
 	let active = [...filters];
 
@@ -308,6 +308,9 @@ export function fitQuery(options: SearchOptions): { query: string; dropped: stri
 		// A single token longer than the whole budget: cutting it is unavoidable, so do it
 		// by code point and report it rather than sending an invalid request.
 		query = Array.from(query).slice(0, MAX_QUERY_CHARS).join("").trim();
+		if (quotesWereBalanced && (query.match(/"/g) ?? []).length % 2 === 1) {
+			query = Array.from(query).slice(0, MAX_QUERY_CHARS - 1).join("").trim() + '"';
+		}
 		dropped.push("query tail");
 	}
 	return { query, dropped };
@@ -493,9 +496,8 @@ const SEARCH_SCHEMA = {
 		},
 		ori_question: {
 			type: "string",
-			maxLength: MAX_ORI_QUESTION_CHARS,
 			description:
-				"The user's original question, verbatim. Improves query understanding and ranking; this ranking signal is unavailable through generic web-search wrappers.",
+				"The user's original question. Improves query understanding and ranking; pass it as-is even if the query is a shortened form. Values over 128 characters are cut and the cut is reported; this ranking signal is unavailable through generic web-search wrappers.",
 		},
 		need_content: {
 			type: "boolean",
@@ -535,7 +537,7 @@ const FETCH_SCHEMA = {
 		url: {
 			type: "string",
 			description:
-				"Absolute public HTTP(S) URL with no embedded credentials, read as Markdown. Local and private addresses are refused.",
+				"Absolute public HTTP(S) URL (≤8192 chars) with no embedded credentials, read as Markdown. Local and private addresses are refused.",
 		},
 		max_chars: {
 			type: "integer",
@@ -568,6 +570,7 @@ export default function (pi: any): void {
 			ctx: any,
 		) {
 			const rawCount = Number(params.count ?? 10);
+			const requestedCount = Number.isFinite(rawCount) ? Math.floor(rawCount) : 10;
 			const domains = (value: unknown, label: string): string[] => {
 				if (value === undefined || value === null) return [];
 				if (!Array.isArray(value)) throw new Error(`${label} must be an array of domain names.`);
@@ -583,7 +586,7 @@ export default function (pi: any): void {
 			const oriQuestionTruncated = oriChars.length > MAX_ORI_QUESTION_CHARS;
 			const options: SearchOptions = {
 				query: assertQueryText(String(params.query ?? "")),
-				count: Math.min(50, Math.max(1, Number.isFinite(rawCount) ? Math.floor(rawCount) : 10)),
+				count: Math.min(50, Math.max(1, requestedCount)),
 				need_content: params.need_content === true,
 				allowedDomains: domains(params.allowed_domains, "allowed_domains"),
 				blockedDomains: domains(params.blocked_domains, "blocked_domains"),
@@ -614,7 +617,11 @@ export default function (pi: any): void {
 
 			// Docs: billable when the request returns HTTP 200 *and* a non-empty results
 			// array — so cost follows the raw array, not what survives client-side filtering.
-			const rawResults = Array.isArray(data?.results) ? data.results : [];
+			// A 200 without a results array is a broken response, not an empty result set.
+			if (!data || typeof data !== "object" || !Array.isArray((data as { results?: unknown }).results)) {
+				throw new Error("DeepSeek /v1/tools/search returned an invalid response: expected a results array");
+			}
+			const rawResults = (data as { results: DeepSeekResult[] }).results;
 			const results = rawResults.filter(
 				(entry) => typeof entry?.url === "string" && /^https?:\/\//i.test(entry.url),
 			);
@@ -647,7 +654,7 @@ export default function (pi: any): void {
 					query,
 					dropped,
 					count: results.length,
-					requestedCount: options.count,
+					requestedCount,
 					discarded,
 					oriQuestionTruncated,
 					needContent: options.need_content,

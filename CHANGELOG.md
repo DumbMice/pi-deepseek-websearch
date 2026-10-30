@@ -19,14 +19,16 @@ Search & Fetch APIs).
 - A fitting query is sent exactly as written, spacing included.
 - An over-length query is trimmed instead of rejected: recency → language → domain filters → trailing words, with a final code-point cut only if a single token exceeds the budget. Every removal is reported.
 - Trimming is token-aware: quoted phrases stay whole and a trailing operator is never left dangling.
-- `ori_question` longer than 128 code points is cut, and the cut is reported in the output and `details`.
+- `ori_question` longer than 128 code points is cut, and the cut is reported in the output and `details`; its schema has no `maxLength`, so the code-point cut is authoritative.
+- `details.requestedCount` reports the pre-clamp `count` ask.
 - Unknown `recency` values and non-IP `localization` values are rejected with an actionable message.
 
 **Transport**
 
 - Retries for `408`, `429`, any `5xx`, network failures and timeouts; 3 attempts; `retry-after` honoured in seconds or HTTP-date form, capped at 5 s.
 - Documented remedies for `401`/`402`/`403`/`404`/`413`/`429`; all other `4xx` fail immediately.
-- 30 s search / 60 s fetch timeouts; caller abort wins and makes no request when already aborted.
+- 30 s search / 60 s fetch timeouts; the caller's abort reason is preserved on every path, including during retry backoff.
+- A 200 search response without a `results` array is rejected as an invalid response rather than reported as "No results".
 - Endpoint override via `PI_DEEPSEEK_BASE_URL` or `DEEPSEEK_SEARCH_BASE_URL`, with `/v1` and trailing slashes stripped.
 - API key from pi's `deepseek` provider, then `DEEPSEEK_API_KEY`; redacted from all error output, and upstream error text is sliced to 400 chars.
 - Fetch URLs are sent normalised, and the 8192-char limit is enforced on both the raw and normalised form.
@@ -45,4 +47,4 @@ Search & Fetch APIs).
 
 **Tests**
 
-- 55 `node:test` cases with mocked HTTP — no key or network required.
+- 64 `node:test` cases with mocked HTTP — no key or network required.
