@@ -19,7 +19,7 @@ Search & Fetch APIs).
 - A fitting query is sent exactly as written, spacing included.
 - An over-length query is trimmed instead of rejected: recency → language → domain filters → trailing words, with a final code-point cut only if a single token exceeds the budget. Every removal is reported.
 - Trimming is token-aware: quoted phrases stay whole and a trailing operator is never left dangling.
-- `ori_question` longer than 128 code points is cut, and the cut is reported in the output and `details`; its schema has no `maxLength`, so the code-point cut is authoritative.
+- `ori_question` longer than 128 code points is cut, and the cut is reported in the output and `details`; the tool-parameter schema has no `maxLength`, so the code-point cut is authoritative.
 - `details.requestedCount` reports the pre-clamp `count` ask.
 - Unknown `recency` values and non-IP `localization` values are rejected with an actionable message.
 
@@ -47,4 +47,4 @@ Search & Fetch APIs).
 
 **Tests**
 
-- 64 `node:test` cases with mocked HTTP — no key or network required.
+- 68 `node:test` cases with mocked HTTP — no key or network required.

@@ -117,7 +117,10 @@ export function errorHint(status: number, path: "/v1/tools/search" | "/v1/tools/
 		return "\nHint: DeepSeek's Fetch security policy rejected this URL.";
 	if (status === 404 && path === "/v1/tools/fetch")
 		return "\nHint: no usable page content (target unavailable, blocked, unsupported type, or an error page).";
-	if (status === 413) return "\nHint: the request body was too large; shorten the URL or query.";
+	if (status === 413)
+		return path === "/v1/tools/fetch"
+			? "\nHint: the request body was too large; shorten the URL."
+			: "\nHint: the request body was too large; shorten the query.";
 	if (status === 429)
 		return "\nHint: rate limit (100 QPS search / 25 QPS fetch account-wide, plus a per-domain fetch limit). Retry after a pause.";
 	return "";
@@ -264,7 +267,8 @@ export function fitQuery(options: SearchOptions): { query: string; dropped: stri
 	if (charLength(untouched) <= MAX_QUERY_CHARS) return { query: untouched, dropped };
 
 	// Only a query that cannot fit is rewritten, token by token, and every change is reported.
-	// A quoted phrase is one token: slicing mid-phrase would silently change its meaning.
+	// An unescaped quoted phrase is one token: slicing mid-phrase would change its meaning.
+	// Backslash-escaped quotes are not special-cased (only reachable on over-length queries).
 	const matchedTokens = raw.match(/"[^"]*"|\S+/g);
 	const tokens: string[] = matchedTokens ? [...matchedTokens] : [raw];
 	const quotesWereBalanced = ((raw.match(/"/g) ?? []).length % 2) === 0;
@@ -308,8 +312,14 @@ export function fitQuery(options: SearchOptions): { query: string; dropped: stri
 		// A single token longer than the whole budget: cutting it is unavoidable, so do it
 		// by code point and report it rather than sending an invalid request.
 		query = Array.from(query).slice(0, MAX_QUERY_CHARS).join("").trim();
+		// A cut can land on a bare operator (`-`, `:`), which the API would reject.
+		while (query.length > 0 && /[-:]$/.test(query)) query = Array.from(query).slice(0, -1).join("").trimEnd();
 		if (quotesWereBalanced && (query.match(/"/g) ?? []).length % 2 === 1) {
-			query = Array.from(query).slice(0, MAX_QUERY_CHARS - 1).join("").trim() + '"';
+			// The cut left one unmatched quote: remove that quote rather than invent a pair.
+			const balanced = Array.from(query);
+			const lastQuote = balanced.lastIndexOf('"');
+			if (lastQuote >= 0) balanced.splice(lastQuote, 1);
+			query = balanced.join("").trimEnd();
 		}
 		dropped.push("query tail");
 	}
@@ -502,7 +512,7 @@ const SEARCH_SCHEMA = {
 		need_content: {
 			type: "boolean",
 			description:
-				"Return extracted page text when the API provides it (falls back to the short summary) — up to 4,000 chars per result, with any truncation reported. Same price per request; uses more context.",
+				"Return extracted page text when the API provides it (falls back to the summary, then the snippet) — up to 4,000 chars per result, with any truncation reported. Same price per request; uses more context.",
 		},
 		allowed_domains: {
 			type: "array",

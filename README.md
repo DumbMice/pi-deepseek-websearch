@@ -69,7 +69,7 @@ Get a key at <https://platform.deepseek.com/api_keys>.
 |---|---|---|
 | `query` | string, required | Operators pass through: `"exact phrase"`, `-word`, `-"phrase"`, `site:a OR site:b`, `-site:c`, `lang:en,zh`, `after:2025-01-01`, `before:2026-06-01`. Capped at 128 chars; longer queries are trimmed (see below) rather than rejected |
 | `count` | integer 1–50 | default 10; the per-request price does not depend on it |
-| `ori_question` | string ≤128 | your original question, used for ranking; a longer value is cut to 128 code points and the cut is reported in the output |
+| `ori_question` | string (cut to 128) | your original question, used for ranking; a longer value is cut to 128 code points and the cut is reported in the output |
 | `need_content` | boolean | return extracted page text when the API provides it (otherwise the `summary`, or the `snippet` if there is no summary), capped at 4,000 chars per result with truncation reported; same price, more context |
 | `allowed_domains` | string[] | compiled to `site:` clauses joined with `OR`; counts toward the 128-char cap |
 | `blocked_domains` | string[] | compiled to `-site:` clauses; counts toward the cap |
@@ -79,7 +79,7 @@ Get a key at <https://platform.deepseek.com/api_keys>.
 
 Each result carries title, URL, site, publication date, authority tier (`0–4`; the API's `-1` renders as *authority unknown*), and rerank score (`≥1.5` annotated as high quality), plus the model-oriented `summary` or the extracted page text. `site_icon` is not rendered but is included in `details`.
 
-`details` also reports: the final `query`, `dropped` (anything trimmed), `count` (results returned), `requestedCount`, `discarded` (unusable results, e.g. no `http(s)` URL), `oriQuestionTruncated`, and `estimatedCostUsd`.
+`details` also reports: the final `query`, `dropped` (anything trimmed), `count` (results returned), `requestedCount`, `discarded` (unusable results, e.g. no `http(s)` URL), `oriQuestionTruncated`, `needContent`, the mapped `results[]`, and `estimatedCostUsd`.
 
 ### `deepseek_fetch`
 
@@ -88,7 +88,7 @@ Each result carries title, URL, site, publication date, authority tier (`0–4`;
 | `url` | string, required | absolute public HTTP(S), ≤8192 chars, no credentials; local/private targets are refused |
 | `max_chars` | integer 500–200000 | default 20000; truncation and clamping are both reported |
 
-Returns the page as Markdown, rendered and extracted server-side. A page with no extractable content is an error rather than an empty success.
+Returns the page as Markdown, rendered and extracted server-side. A page with no extractable content is an error rather than an empty success. `details` reports `url`, `title`, `chars`, `maxChars`, `truncated` and `estimatedCostUsd`.
 
 ## Behaviour worth knowing
 
@@ -111,31 +111,34 @@ Returns the page as Markdown, rendered and extracted server-side. A page with no
 
 Validated against <https://api-docs.deepseek.com/guides/search>, `/api/search` and `/api/fetch` on **2026-10-30** (`DOCS_SNAPSHOT` in `src/index.ts`). The wire contract is followed exactly where the docs define it: endpoints, auth headers, request fields and defaults, response field semantics, price, QPS and the documented error taxonomy.
 
-Client-side deviations, listed in full. Items producing no signal in the output are marked _(silent)_.
+Client-side deviations and transport details, listed in full. Items producing no signal in the output are marked _(silent)_.
 
-1. over-length queries are trimmed rather than rejected, and every removal is reported;
+1. over-length queries are trimmed rather than rejected, and every removal is reported; a single token longer than the whole budget is cut mid-token;
 2. query whitespace is normalised only when the query must be rewritten, and that is reported in the same line;
 3. leading/trailing whitespace is stripped from `query`, `ori_question` and `localization` before use _(silent — the API rejects all-whitespace queries anyway)_;
 4. result body text (extracted content, else `summary`, else `snippet`) is capped at 4,000 chars per result; the true length is printed;
-5. `count` is clamped to 1–50 instead of the API returning 400 — `details.requestedCount` still shows the original ask;
+5. `count` is clamped to 1–50 instead of the API returning 400 — the schema declares the range too, and clamping is the fallback if a host passes values through unvalidated; `details.requestedCount` still shows the original ask;
 6. results without an `http(s)` URL are discarded defensively — the count is reported and the price still reflects the raw response;
 7. `site_icon` is surfaced in `details` but not rendered;
 8. `ori_question` longer than 128 code points is cut, and the cut is reported in the output and `details`;
 9. `deepseek_fetch` blocks local/private addresses (docs impose no such rule);
 10. Fetch Markdown is unescaped heuristically (docs only promise Markdown) _(silent; never inside code)_;
-11. `max_chars` truncates Fetch output and clamps out-of-range values, both reported;
+11. `max_chars` truncates Fetch output and clamps out-of-range values (again, the schema declares the range), both reported;
 12. a 200 response with empty Fetch content is treated as an error (docs route empty extraction to 404);
 13. `date` is displayed as `YYYY-MM-DD` while the API returns RFC 3339 — the full timestamp stays in `details`;
 14. the Fetch `url` is sent in its normalised form (`URL.toString()`: IDN punycoding, lowercased host, added `/`), and the 8192-char limit is checked against both the raw and the normalised form;
-15. redirects are not followed (`redirect: "error"`), so a 3xx surfaces as a fetch error and is retried like a network failure (item 16) _(silent)_;
+15. redirects of the API request itself are not followed (`redirect: "error"` on the call to `api.deepseek.com`), so a 3xx from the API surfaces as a fetch error and is retried like a network failure (item 16). Target-page redirects are DeepSeek's concern, not this client's _(silent)_;
 16. network failures and timeouts are retried beyond the documented `408/429/5xx` list (they are unbilled) _(silent)_;
 17. `retry-after` support is an inference — the docs never mention the header — and the delay is capped at 5 s _(silent)_;
 18. the 128- and 8192-character limits are counted in code points. The docs say "1 to 128 Unicode characters" for `query` and "characters" elsewhere, without fixing code points vs UTF-16 units _(silent)_;
-19. client request timeouts are 30 s (search) and 60 s (fetch); the docs describe no response deadline _(silent)_;
+19. client request timeouts are 30 s (search) and 60 s (fetch) **per attempt**, so a call that keeps timing out can run ~90 s (search) or ~180 s (fetch) plus backoff before the third attempt fails; the docs describe no response deadline _(silent)_;
 20. a 200 search body without a `results` array is rejected as an invalid response instead of being reported as "No results";
-21. `localization` must be an IP literal — the docs only say "an optional IP address", so a country code is rejected client-side.
+21. `localization` must be an IP literal — the docs only say "an optional IP address", so a country code is rejected client-side;
+22. upstream error messages are sliced to 400 characters before display _(silent)_;
+23. result fields of an unexpected type are ignored rather than passed through, so one malformed result degrades instead of failing the call _(silent)_;
+24. `recency` windows are fixed client-side at 1 / 7 / 30 / 365 days for `day` / `week` / `month` / `year`.
 
-Transport details, for completeness: requests send `Accept: application/json` alongside the two documented headers, and retry backoff is 500 ms → 1 s → 2 s when no `retry-after` is present.
+Transport details, for completeness: requests send `Accept: application/json` alongside the two documented headers; retry backoff is 500 ms then 1 s when no `retry-after` is present (two sleeps for three attempts); and a 200 response with a non-JSON body fails immediately without a retry.
 
 If DeepSeek changes the API, bump `DOCS_SNAPSHOT` and update the affected tests.
 
@@ -144,7 +147,7 @@ If DeepSeek changes the API, bump `DOCS_SNAPSHOT` and update the affected tests.
 Requires Node >= 22.6 (the test runner uses `--experimental-strip-types`).
 
 ```bash
-npm test              # node:test, 64 tests, mocked HTTP — no API key or network needed
+npm test              # node:test, 68 tests, mocked HTTP — no API key or network needed
 npm run typecheck     # tsc --noEmit, strict
 npm run pack:check    # tarball contents (no tests, no devDependencies)
 ```

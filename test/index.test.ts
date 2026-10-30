@@ -891,3 +891,63 @@ test("deepseek_search: an over-long ori_question is no longer schema-rejected be
 		stub.restore();
 	}
 });
+
+/* ------------------------------------- round-4 review regressions and gaps */
+
+test("fitQuery: a cut cannot leave a bare operator tail", () => {
+	for (const query of ["a".repeat(127) + "-b", "a".repeat(123) + "site:" + "b"]) {
+		const { query: built } = fitQuery({ ...base(), query });
+		assert.ok(!/[-:]$/.test(built), `dangling operator in ${JSON.stringify(built.slice(-8))}`);
+		assert.ok(Array.from(built).length <= MAX_QUERY_CHARS);
+	}
+});
+
+test("fitQuery: quote parity holds when the 128th code point is itself a quote", () => {
+	for (const query of [
+		"a".repeat(127) + '"b"',
+		'"' + "a".repeat(300) + '"',
+		'a "b c" ' + "d".repeat(200),
+	]) {
+		const { query: built } = fitQuery({ ...base(), query });
+		assert.equal(
+			(built.match(/"/g) ?? []).length % 2,
+			0,
+			`unbalanced quotes in ${JSON.stringify(built.slice(-10))}`,
+		);
+		assert.ok(Array.from(built).length <= MAX_QUERY_CHARS);
+	}
+});
+
+test("deepseek_search: null and array 200 bodies are rejected by the results guard", async () => {
+	const { search, ctx } = harness();
+	for (const body of [null, [], "text"]) {
+		const stub = stubFetch(() => json(body));
+		try {
+			await assert.rejects(
+				() => search.execute("t", { query: "q" }, undefined, undefined, ctx),
+				/expected a results array/,
+			);
+		} finally {
+			stub.restore();
+		}
+	}
+});
+
+test("deepseek_search: requestedCount reports non-finite and fractional asks consistently", async () => {
+	const { search, ctx } = harness();
+	const stub = stubFetch(() => json({ results: [] }));
+	try {
+		for (const [ask, expected] of [
+			[Number.POSITIVE_INFINITY, 10],
+			[Number.NaN, 10],
+			[12.7, 12],
+			[-5, -5],
+		] as const) {
+			const result = await search.execute("t", { query: "q", count: ask }, undefined, undefined, ctx);
+			assert.equal(result.details.requestedCount, expected, `count ${String(ask)}`);
+		}
+		assert.equal(stub.calls.at(-1)!.body.count, 1, "wire count is still clamped for a negative ask");
+	} finally {
+		stub.restore();
+	}
+});
