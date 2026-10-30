@@ -9,6 +9,8 @@ republishes the corrected text.
   package is published".
 - The sample-output block no longer overflows horizontally; the per-result
   fields it used to cram into a comment are described in the prose below it.
+- README badges: npm version, npm downloads, license, Node engine, CI status, and
+  a "coexists with pi-web-access" badge.
 
 ## 0.1.0 — 2026-10-30
 

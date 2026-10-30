@@ -1,5 +1,12 @@
 # @dumbmice/pi-deepseek-websearch
 
+[![npm version](https://img.shields.io/npm/v/@dumbmice/pi-deepseek-websearch)](https://www.npmjs.com/package/@dumbmice/pi-deepseek-websearch)
+[![npm downloads](https://img.shields.io/npm/dm/@dumbmice/pi-deepseek-websearch)](https://www.npmjs.com/package/@dumbmice/pi-deepseek-websearch)
+[![license](https://img.shields.io/npm/l/@dumbmice/pi-deepseek-websearch)](LICENSE)
+[![node](https://img.shields.io/node/v/@dumbmice/pi-deepseek-websearch)](package.json)
+[![tests](https://github.com/DumbMice/pi-deepseek-websearch/actions/workflows/test.yml/badge.svg)](https://github.com/DumbMice/pi-deepseek-websearch/actions/workflows/test.yml)
+[![coexists with pi-web-access](https://img.shields.io/badge/coexists%20with-pi--web--access-2ea44f)](#why)
+
 DeepSeek **Search** and **Fetch** API tools for the [pi coding agent](https://pi.dev) — direct access to the fields and parameters that generic web-search wrappers throw away.
 
 Two tools, no dependencies, and it **coexists with `pi-web-access`**: different tool names, no web-search.json keys of its own, no settings to migrate.
