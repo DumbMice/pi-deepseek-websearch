@@ -2,7 +2,8 @@
 
 ## 0.1.0 — 2026-10-30
 
-First release.
+First release. Package name: `pi-deepseek-websearch` (web search and page fetch over DeepSeek's
+Search & Fetch APIs).
 
 **Tools**
 

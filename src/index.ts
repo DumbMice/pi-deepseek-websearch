@@ -1,5 +1,5 @@
 /**
- * pi-deepseek-api — direct, high-fidelity access to DeepSeek's Search & Fetch APIs.
+ * pi-deepseek-websearch — web search and page fetch over DeepSeek's Search & Fetch APIs.
  *
  * Why this exists: pi-web-access maps DeepSeek's Search API onto a generic provider
  * interface, which drops `date`, `authority` and `rerank_score`, never sends

@@ -1,4 +1,4 @@
-# pi-deepseek-api
+# pi-deepseek-websearch
 
 DeepSeek **Search** and **Fetch** API tools for the [pi coding agent](https://pi.dev) — direct access to the fields and parameters that generic web-search wrappers throw away.
 
@@ -35,13 +35,13 @@ Use it when you need DeepSeek's ranking, publication dates, or a specific `count
 
 ```bash
 # from npm, once the package is published
-pi install npm:pi-deepseek-api
+pi install npm:pi-deepseek-websearch
 
 # from a working copy (works today, no publish required)
-pi install /absolute/path/to/pi-deepseek-api
+pi install /absolute/path/to/pi-deepseek-websearch
 
 # try it for one session
-pi -e /absolute/path/to/pi-deepseek-api
+pi -e /absolute/path/to/pi-deepseek-websearch
 ```
 
 Requires Node >= 22.6 (the shipped entry point is TypeScript, loaded by pi's own runtime).

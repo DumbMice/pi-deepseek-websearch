@@ -1,7 +1,7 @@
 {
-  "name": "pi-deepseek-api",
+  "name": "pi-deepseek-websearch",
   "version": "0.1.0",
-  "description": "DeepSeek Search & Fetch API tools for pi: publication dates, authority, rerank score, ori_question, count up to 50, and graceful 128-char handling. Coexists with pi-web-access.",
+  "description": "Web search and page fetch for pi via DeepSeek's Search & Fetch APIs: publication dates, authority, rerank score, ori_question, count up to 50, and graceful 128-char handling. Coexists with pi-web-access.",
   "type": "module",
   "license": "MIT",
   "author": {
@@ -17,7 +17,9 @@
     "web-search",
     "web-fetch",
     "search-api",
-    "llm-tools"
+    "llm-tools",
+    "websearch",
+    "deepseek-search"
   ],
   "files": [
     "src",
