@@ -34,6 +34,18 @@ jobs:
 
       - run: npm run typecheck
 
+      - name: OIDC diagnostics
+        run: |
+          echo "node: $(node --version)"
+          echo "npm: $(npm --version)"
+          echo "repository.url: $(node -p "require('./package.json').repository.url")"
+          if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "id-token endpoint: present"
+          else
+            echo "id-token endpoint: MISSING (permissions: id-token: write not applied?)"
+          fi
+          echo "NODE_AUTH_TOKEN set: ${NODE_AUTH_TOKEN:+yes}${NODE_AUTH_TOKEN:-no}"
+
       # Guard against publishing a tag whose version disagrees with package.json.
       - name: Verify tag matches package version
         if: startsWith(github.ref, 'refs/tags/')
