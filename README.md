@@ -1,4 +1,4 @@
-# pi-deepseek-websearch
+# @dumbmice/pi-deepseek-websearch
 
 DeepSeek **Search** and **Fetch** API tools for the [pi coding agent](https://pi.dev) — direct access to the fields and parameters that generic web-search wrappers throw away.
 
@@ -35,7 +35,7 @@ Use it when you need DeepSeek's ranking, publication dates, or a specific `count
 
 ```bash
 # from npm, once the package is published
-pi install npm:pi-deepseek-websearch   # not `pi-deepseek-web-search`, which is a different package
+pi install npm:@dumbmice/pi-deepseek-websearch
 
 # straight from GitHub
 pi install git:github.com/DumbMice/pi-deepseek-websearch

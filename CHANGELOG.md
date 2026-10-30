@@ -2,8 +2,9 @@
 
 ## 0.1.0 — 2026-10-30
 
-First release. Package name: `pi-deepseek-websearch` (web search and page fetch over DeepSeek's
-Search & Fetch APIs).
+First release. Package name: `@dumbmice/pi-deepseek-websearch` (web search and page fetch over
+DeepSeek's Search & Fetch APIs); published scoped because npm treats the unscoped name as too
+similar to the existing `pi-deepseek-web-search`.
 
 **Tools**
 
