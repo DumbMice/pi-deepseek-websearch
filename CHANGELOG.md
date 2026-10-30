@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.3 — 2026-10-30
+
+- README is user-facing only: the development and release instructions moved to
+  CONTRIBUTING.md, with a single pointer left behind.
+
 ## 0.1.2 — 2026-10-30
 
 - README: document the release path in full — trusted publishing via GitHub OIDC, no

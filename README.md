@@ -153,38 +153,9 @@ Transport details, for completeness: requests send `Accept: application/json` al
 
 If DeepSeek changes the API, bump `DOCS_SNAPSHOT` and update the affected tests.
 
-## Development
+## Contributing
 
-Requires Node >= 22.6 (the test runner uses `--experimental-strip-types`).
-
-```bash
-npm test              # node:test, 68 tests, mocked HTTP — no API key or network needed
-npm run typecheck     # tsc --noEmit, strict
-npm run pack:check    # tarball contents (no tests, no devDependencies)
-```
-
-The suite covers query trimming order and the 128 cap, caller-spacing preservation, documented validation rules, metadata rendering (`authority: -1`, score annotation, summary/snippet/content precedence, malformed fields), retry classification for every documented status, key redaction, URL safety including encoding bypasses, abort handling, and both tool call shapes.
-
-## Releasing
-
-Versions are published from CI with npm [trusted publishing](https://docs.npmjs.com/trusted-publishers):
-the workflow exchanges a GitHub OIDC token for a short-lived publish credential, so the repository
-holds **no `NPM_TOKEN` secret** and no long-lived write credential (including a 2FA-bypass token)
-is needed or permitted. Because the repository is public, npm attaches a **provenance attestation**
-automatically — no `--provenance` flag.
-
-```bash
-npm version patch --no-git-tag-version   # or minor/major
-git commit -am "chore: release v$(node -p "require('./package.json').version")"
-git tag "v$(node -p "require('./package.json').version")"
-git push origin main --follow-tags        # .github/workflows/publish.yml runs test + typecheck, then publishes
-```
-
-`.github/workflows/publish.yml` runs the 68 tests and the typecheck, and refuses to publish when the
-pushed tag and `package.json` version disagree, so a mis-versioned tag fails the build instead of
-shipping the wrong number. For maximum safety the package's *Publishing access* can then be set to
-"Require two-factor authentication and disallow tokens": trusted publishing keeps working, token
-publishing stops.
+Development setup, tests and the release process live in [CONTRIBUTING.md](https://github.com/DumbMice/pi-deepseek-websearch/blob/main/CONTRIBUTING.md).
 
 ## License
 
