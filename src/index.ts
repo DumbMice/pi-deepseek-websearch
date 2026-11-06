@@ -242,10 +242,9 @@ async function postDeepSeek<T>(
 /* ------------------------------------------------------------------- query */
 
 /**
- * Trim to the API's hard character budget (docs: 1-128 Unicode characters including
- * operators). Filters are shed first — recency, then language, then domains — and only
- * then trailing free-text words. Every removal is reported so the caller can see that
- * the request differs from what was asked for.
+ * Fit the assembled query into the API's hard limit (docs: 1-128 Unicode characters,
+ * operators included). Filters are explicit constraints, so they are kept and the
+ * free-text part is shortened instead. Every removal is reported.
  */
 export function fitQuery(options: SearchOptions): { query: string; dropped: string[] } {
 	const dropped: string[] = [];
@@ -272,33 +271,36 @@ export function fitQuery(options: SearchOptions): { query: string; dropped: stri
 	const untouched = [raw, ...filters].filter(Boolean).join(" ");
 	if (charLength(untouched) <= MAX_QUERY_CHARS) return { query: untouched, dropped };
 
-	// Only a query that cannot fit is rewritten, token by token, and every change is reported.
+	// The filters occupy the tail of the string, so they set the budget for the words.
+	const filterText = filters.join(" ");
+	const filterCost = filterText ? charLength(filterText) + 1 : 0;
+	const available = MAX_QUERY_CHARS - filterCost;
+	if (available < 1) {
+		const names = [
+			options.allowedDomains.length > 0 ? "allowed_domains" : "",
+			options.blockedDomains.length > 0 ? "blocked_domains" : "",
+			options.lang ? "lang" : "",
+			options.recency ? "recency" : "",
+		].filter(Boolean);
+		const named =
+			names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0]!;
+		throw new Error(
+			`The ${named} ${names.length > 1 ? "filters need" : "filter needs"} ${filterCost} characters ` +
+				"of the 128-character query limit, leaving no room for the search text. " +
+				"Shorten the filter values or remove a filter.",
+		);
+	}
+
 	// An unescaped quoted phrase is one token: slicing mid-phrase would change its meaning.
 	// Backslash-escaped quotes are not special-cased (only reachable on over-length queries).
 	const matchedTokens = raw.match(/"[^"]*"|\S+/g);
-	const tokens: string[] = matchedTokens ? [...matchedTokens] : [raw];
+	let words: string[] = matchedTokens ? [...matchedTokens] : [raw];
 	const quotesWereBalanced = ((raw.match(/"/g) ?? []).length % 2) === 0;
-	if (raw !== tokens.join(" ")) dropped.push("query whitespace normalised");
-	let words = tokens;
-	let active = [...filters];
-
-	const overBudget = () => charLength(join(words, active)) > MAX_QUERY_CHARS;
-	const dropFilter = (predicate: (filter: string) => boolean, label: (filter: string) => string): void => {
-		const index = active.findIndex(predicate);
-		if (index < 0 || !overBudget()) return;
-		const [removed] = active.splice(index, 1);
-		dropped.push(label(removed!));
-	};
-
-	dropFilter((f) => f.startsWith("after:"), (f) => `recency (${f})`);
-	dropFilter((f) => f.startsWith("lang:"), (f) => `language (${f})`);
-	while (overBudget() && active.length > 0) {
-		const removed = active.pop()!;
-		dropped.push(`domain filter (${removed.slice(0, 40)})`);
-	}
+	if (raw !== words.join(" ")) dropped.push("query whitespace normalised");
 
 	const wordsBefore = words.join(" ");
-	while (words.length > 1 && overBudget()) words = words.slice(0, -1);
+	while (words.length > 1 && charLength(words.join(" ")) > available) words = words.slice(0, -1);
+
 	// Never leave a dangling operator (`site:`, `-site:`, `after:`, a bare `-`) or an
 	// unbalanced quote behind: DeepSeek would answer 400 and no retry would help.
 	const danglingOperator = /^(?:-|-[A-Za-z]+:|[A-Za-z]+:)$/;
@@ -313,20 +315,37 @@ export function fitQuery(options: SearchOptions): { query: string; dropped: stri
 		dropped.push("trailing query words");
 	}
 
-	let query = join(words, active);
+	let query = join(words, filters);
 	if (charLength(query) > MAX_QUERY_CHARS) {
-		// A single token longer than the whole budget: cutting it is unavoidable, so do it
-		// by code point and report it rather than sending an invalid request.
-		query = Array.from(query).slice(0, MAX_QUERY_CHARS).join("").trim();
-		// A cut can land on a bare operator (`-`, `:`), which the API would reject.
-		while (query.length > 0 && /[-:]$/.test(query)) query = Array.from(query).slice(0, -1).join("").trimEnd();
-		if (quotesWereBalanced && (query.match(/"/g) ?? []).length % 2 === 1) {
-			// The cut left one unmatched quote: remove that quote rather than invent a pair.
-			const balanced = Array.from(query);
-			const lastQuote = balanced.lastIndexOf('"');
-			if (lastQuote >= 0) balanced.splice(lastQuote, 1);
-			query = balanced.join("").trimEnd();
+		// One indivisible token longer than the remaining budget: cutting it is unavoidable,
+		// so do that by code point rather than dropping a filter.
+		let cut = Array.from(words.join(" ")).slice(0, available).join("").trim();
+		// Repeat until stable: splicing an unmatched quote can expose a trailing `-`/`:`.
+		for (let changed = true; changed; ) {
+			changed = false;
+			const stripped = cut.replace(/[-:]+$/, "").trimEnd();
+			if (stripped !== cut) {
+				cut = stripped;
+				changed = true;
+			}
+			if (quotesWereBalanced && (cut.match(/"/g) ?? []).length % 2 === 1) {
+				const balanced = Array.from(cut);
+				const lastQuote = balanced.lastIndexOf('"');
+				if (lastQuote >= 0) balanced.splice(lastQuote, 1);
+				const next = balanced.join("").trimEnd();
+				if (next !== cut) {
+					cut = next;
+					changed = true;
+				}
+			}
 		}
+		if (cut === "" && filters.length === 0) {
+			throw new Error(
+				"The query has no searchable text within the 128-character limit — it consists only of " +
+					"operators or punctuation. Add search terms.",
+			);
+		}
+		query = join([cut], filters);
 		dropped.push("query tail");
 	}
 	return { query, dropped };
@@ -502,7 +521,7 @@ const SEARCH_SCHEMA = {
 			type: "string",
 			minLength: 1,
 			description:
-				'Search query. Supports operators: "exact phrase", -word, -"phrase", site:a.com OR site:b.com, -site:c.com, lang:en,zh, after:2025-01-01, before:2026-06-01. Queries are capped at 128 chars including operators; anything longer is trimmed automatically (filters shed first, then trailing words) and the removals are reported in the output — do not pre-shorten.',
+				'Search query. Supports operators: "exact phrase", -word, -"phrase", site:a.com OR site:b.com, -site:c.com, lang:en,zh, after:2025-01-01, before:2026-06-01. Queries are capped at 128 chars including operators; anything longer is trimmed automatically (trailing words are removed, filters are kept) and the removals are reported in the output — do not pre-shorten.',
 		},
 		count: {
 			type: "integer",
@@ -524,13 +543,13 @@ const SEARCH_SCHEMA = {
 			type: "array",
 			items: { type: "string" },
 			description:
-				"Restrict results to these domains (compiled into site: OR site:). Counts toward the 128-char query cap, so a long domain list can be dropped for very long queries — any drop is reported in the output.",
+				"Restrict results to these domains (compiled into site: OR site:). Counts toward the 128-char query cap and is never dropped by trimming; if the filters leave no room for the query text, the call fails before any request.",
 		},
 		blocked_domains: {
 			type: "array",
 			items: { type: "string" },
 			description:
-				"Exclude these domains (compiled into -site:). Counts toward the 128-char query cap and may be dropped for very long queries; any drop is reported.",
+				"Exclude these domains (compiled into -site:). Counts toward the 128-char query cap and is never dropped by trimming; if the filters leave no room for the query text, the call fails before any request.",
 		},
 		lang: { type: "string", description: 'Language codes, e.g. "zh,en" (becomes lang:).' },
 		recency: {

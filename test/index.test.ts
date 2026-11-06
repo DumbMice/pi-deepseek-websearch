@@ -43,7 +43,7 @@ test("fitQuery: keeps filters when everything fits", () => {
 	assert.ok(chars(query) <= MAX_QUERY_CHARS);
 });
 
-test("fitQuery: sheds filters before words, and reports each removal", () => {
+test("fitQuery: keeps every filter and removes trailing words instead", () => {
 	const query =
 		"what is the current recommended way to configure a long running daemon process with systemd socket activation and restart limits and logging and how do I debug failures";
 	const { query: built, dropped } = fitQuery(
@@ -56,12 +56,40 @@ test("fitQuery: sheds filters before words, and reports each removal", () => {
 		}),
 	);
 	assert.ok(chars(built) <= MAX_QUERY_CHARS, `built query is ${chars(built)} chars`);
-	const order = ["recency (", "language (", "domain filter (", "trailing query words"];
-	const positions = order.map((prefix) => dropped.findIndex((d) => d.startsWith(prefix) || d === prefix));
-	assert.ok(positions.every((position) => position >= 0), `missing drop: ${JSON.stringify(dropped)}`);
-	assert.deepEqual([...positions].sort((a, b) => a - b), positions, "drops must follow recency → language → domains → words");
+	// Filters survive; only the free text is shortened.
+	assert.match(built, /site:freedesktop\.org OR site:archlinux\.org/);
+	assert.match(built, /-site:example\.com/);
+	assert.match(built, /lang:en/);
+	assert.match(built, /after:\d{4}-\d{2}-\d{2}/);
+	assert.deepEqual(dropped, ["trailing query words"]);
 	// The surviving text keeps the original word order and never gains new words.
 	assert.ok(query.startsWith(built.split(" site:")[0]!.slice(0, 40)));
+});
+
+test("fitQuery: a filter set that leaves no room for text fails before any request", async () => {
+	const domains = Array.from({ length: 6 }, (_, i) => `domain-${i}-with-a-long-name.example`);
+	const opts = base({ query: "anything", allowedDomains: domains, recency: "year" });
+	assert.throws(() => fitQuery(opts), /leaving no room for the search text/);
+
+	// The same path through the tool must not issue a request.
+	const { search, ctx } = harness();
+	const stub = stubFetch(() => json({ results: [] }));
+	try {
+		await assert.rejects(
+			() =>
+				search.execute(
+					"t",
+					{ query: "anything", allowed_domains: domains, recency: "year" },
+					undefined,
+					undefined,
+					ctx,
+				),
+			/leaving no room for the search text/,
+		);
+		assert.equal(stub.calls.length, 0, "no request is sent when the filters cannot fit");
+	} finally {
+		stub.restore();
+	}
 });
 
 test("fitQuery: filters never push a fitting query over the limit", () => {
@@ -1054,4 +1082,67 @@ test("deepseek_search: domain entries that would rewrite the query structure are
 	} finally {
 		stub.restore();
 	}
+});
+
+/* ------------------------- final review: cut-with-filters and boundary paths */
+
+test("fitQuery: cutting an over-long token keeps the filters and stays within 128", () => {
+	const { query, dropped } = fitQuery(
+		base({ query: "x".repeat(200), allowedDomains: ["a.example"], recency: "year" }),
+	);
+	assert.equal(chars(query), MAX_QUERY_CHARS);
+	assert.match(query, /site:a\.example/);
+	assert.match(query, /after:\d{4}-\d{2}-\d{2}/);
+	assert.ok(dropped.includes("query tail"));
+});
+
+test("fitQuery: the tail cut never leaves a dangling operator before the filters", () => {
+	const domain = "a".repeat(116);
+	const { query } = fitQuery(base({ query: 'site:"foo bar"', allowedDomains: [domain] }));
+	const filterText = `site:${domain}`;
+	assert.ok(query.endsWith(filterText), `filters must survive: ${JSON.stringify(query.slice(-20))}`);
+	const wordPart = query.slice(0, query.length - filterText.length - 1);
+	assert.ok(wordPart.length > 0, "some search text must remain");
+	assert.doesNotMatch(wordPart, /[-:]$/, `word part ends with an operator: ${JSON.stringify(wordPart)}`);
+	assert.ok(chars(query) <= MAX_QUERY_CHARS);
+});
+
+test("fitQuery: the no-room error reports the true filter cost and uses the singular form", () => {
+	const domains = Array.from({ length: 6 }, (_, i) => `domain-${i}-with-a-long-name.example`);
+	const filterText = domains.map((domain) => `site:${domain}`).join(" OR ");
+	const expected = chars(filterText) + 1; // plus the separating space
+	assert.throws(
+		() => fitQuery(base({ query: "anything", allowedDomains: domains })),
+		new RegExp(`allowed_domains filter needs ${expected} characters`),
+	);
+});
+
+/* ----------------------- round-2 review: boundary budgets and empty results */
+
+test("fitQuery: a filter set leaving exactly one character of room is sent, not rejected", () => {
+	const domain = "a".repeat(121); // "site:" + 121 = 126; + separator = 127; room = 1
+	const { query } = fitQuery(base({ query: "abc", allowedDomains: [domain] }));
+	assert.equal(chars(query), MAX_QUERY_CHARS);
+	assert.ok(query.endsWith(`site:${domain}`), "the filter must survive");
+	assert.equal(query.slice(0, query.length - 126 - 1), "a");
+});
+
+test("fitQuery: a filter set leaving no room throws with the true cost", () => {
+	const domain = "a".repeat(122); // 127 + separator = 128
+	assert.throws(
+		() => fitQuery(base({ query: "abc", allowedDomains: [domain] })),
+		/allowed_domains filter needs 128 characters/,
+	);
+});
+
+test("fitQuery: the plural error names each filter", () => {
+	const domains = Array.from({ length: 6 }, (_, i) => `domain-${i}-long.example`);
+	assert.throws(
+		() => fitQuery(base({ query: "abc", allowedDomains: domains, recency: "year" })),
+		/allowed_domains and recency filters need \d+ characters/,
+	);
+});
+
+test("fitQuery: a query of only operators is rejected instead of sending an empty string", () => {
+	assert.throws(() => fitQuery(base({ query: "-".repeat(200) })), /no searchable text/);
 });
