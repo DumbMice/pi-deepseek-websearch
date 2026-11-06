@@ -6,6 +6,14 @@ All notable changes to this extension are documented in this file. The format fo
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-11-06
+
+### Fixed
+
+- Over-length queries no longer lose their filters. Trimming keeps `allowed_domains`, `blocked_domains`,
+  `lang` and `recency` and removes trailing words instead; a filter set that leaves no room for search
+  text fails before the request rather than sending the query with those filters stripped.
+
 ## [0.1.4] - 2026-10-30
 
 ### Added
@@ -72,7 +80,8 @@ results are not billed. Validated against the DeepSeek API documentation as of 2
 - `deepseek_fetch` rejects local and private targets and never unescapes inside code.
 
 
-[Unreleased]: https://github.com/DumbMice/pi-deepseek-websearch/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/DumbMice/pi-deepseek-websearch/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/DumbMice/pi-deepseek-websearch/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/DumbMice/pi-deepseek-websearch/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/DumbMice/pi-deepseek-websearch/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/DumbMice/pi-deepseek-websearch/compare/v0.1.1...v0.1.2

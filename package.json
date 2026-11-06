@@ -1,6 +1,6 @@
 {
   "name": "@dumbmice/pi-deepseek-websearch",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "DeepSeek web search and page fetch tools for the pi coding agent: publication dates, authority, rerank scores, ori_question, count 1-50.",
   "type": "module",
   "license": "MIT",
