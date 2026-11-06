@@ -11,8 +11,9 @@ extension can emit is always a valid request.
 Client-side deviations and transport details, listed in full. Items that produce no signal in the
 output are marked _(silent)_; everything else is observable in the reply or in `details`.
 
-1. over-length queries are trimmed rather than rejected, and every removal is reported; a single
-   token longer than the whole budget is cut mid-token;
+1. over-length queries are trimmed rather than rejected, and every removal is reported. Filters are
+   kept and trailing words are removed; a single token longer than the remaining budget is cut
+   mid-token. If the filters alone leave no room for search text, the call fails before the request;
 2. query whitespace is normalised only when the query must be rewritten, and that is reported in the
    same line;
 3. leading and trailing whitespace is stripped from `query`, `ori_question` and `localization` before
@@ -63,7 +64,9 @@ output are marked _(silent)_; everything else is observable in the reply or in `
 23. result fields of an unexpected type are ignored rather than passed through, so one malformed
     result degrades instead of failing the call _(silent)_;
 24. `recency` windows are fixed client-side at 1 / 7 / 30 / 365 days for `day` / `week` / `month` /
-    `year`.
+    `year`;
+25. domain list entries that are empty or contain whitespace or a quote are dropped before the query is
+    assembled _(silent)_.
 
 Transport details: requests send `Accept: application/json` alongside the two documented headers;
 retry backoff is 500 ms then 1 s when no `retry-after` is present (two sleeps for three attempts); and

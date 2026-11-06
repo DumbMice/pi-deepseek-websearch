@@ -104,9 +104,11 @@ an error, not as an empty success.
 
 ## Behaviour to expect
 
-- **Long queries are trimmed, not rejected.** The 128-character cap includes operators; when a query
-  is shortened, the reply names what went — filters first, then trailing words, then a truncated tail
-  — and prints the final query.
+- **Long queries are trimmed, not rejected.** The 128-character cap includes operators. When a query
+  is shortened, trailing words are removed and the filters are kept (a single word or quoted
+  phrase longer than the remaining room is cut); the reply names what went and prints the final query. If the filters alone
+  leave no room for search text, the call fails before any request — shorten the domain list or
+  remove a filter to send it.
 - **Transient failures are retried.** `408`, `429`, any `5xx`, network failures and timeouts get up
   to three attempts, honouring `retry-after` (seconds or an HTTP date) capped at 5 seconds. Every
   other `4xx` fails immediately with DeepSeek's own message. Each attempt has its own deadline: 30

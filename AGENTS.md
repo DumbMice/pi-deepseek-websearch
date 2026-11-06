@@ -45,10 +45,12 @@ README text, the matching `docs/docs-alignment.md` entry (or marking that item s
   no-runtime-dependencies rule. Do not replace them with `Type.Object` imports.
 - **A fitting query is never rewritten.** `fitQuery` returns the caller's text untouched when it fits,
   apart from stripped leading/trailing whitespace. Only an over-long query is tokenised and trimmed.
-- **Trimming is bounded and reported.** Shed filters (recency, language, domains) first, then trailing
-  words, then a code-point tail cut; drop a dangling operator or unmatched quote; record every removal
-  in `dropped`. Whitespace stripped from `query`, `ori_question` and `localization` before use is
-  silent (register item 3).
+- **Filters are constraints; words are expendable.** When the assembled query exceeds 128 characters,
+  keep every filter and remove trailing words; cut one indivisible token by code point only if it
+  alone exceeds the remaining budget. If the filters leave no room for search text, fail before the
+  request. Drop a dangling operator or unmatched quote, and record every removal in `dropped`.
+  Whitespace stripped from `query`, `ori_question` and `localization` before use is silent
+  (register item 3).
 - **Cost follows the raw response.** `estimatedCostUsd` is keyed to `rawResults.length`, not to what
   survives client-side filtering, because DeepSeek bills a non-empty result set.
 - **A malformed 200 is an error.** A body without a `results` array is rejected; an empty array is a
