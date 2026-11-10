@@ -6,6 +6,19 @@ All notable changes to this extension are documented in this file. The format fo
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-11-06
+
+### Added
+
+- `docs/pi-api-alignment.md`: a tested-version table recording the pi release (`1.5.1`) and Node
+  version this package is verified against, pinned by `PI_API_SNAPSHOT` and a docs test so the claim
+  cannot drift from the code.
+
+### Changed
+
+- `engines.node` raised to `>=22.19`, matching pi 1.5.1's own floor. The README now states the pi
+  version it was tested with.
+
 ## [0.1.5] - 2026-11-06
 
 ### Fixed
@@ -80,7 +93,8 @@ results are not billed. Validated against the DeepSeek API documentation as of 2
 - `deepseek_fetch` rejects local and private targets and never unescapes inside code.
 
 
-[Unreleased]: https://github.com/DumbMice/pi-deepseek-websearch/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/DumbMice/pi-deepseek-websearch/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/DumbMice/pi-deepseek-websearch/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/DumbMice/pi-deepseek-websearch/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/DumbMice/pi-deepseek-websearch/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/DumbMice/pi-deepseek-websearch/compare/v0.1.2...v0.1.3
