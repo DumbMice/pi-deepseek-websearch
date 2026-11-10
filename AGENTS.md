@@ -10,6 +10,7 @@ Instructions for anyone — human or coding agent — changing
 src/index.ts              the extension: two tool registrations, transport, formatting, guards
 test/index.test.ts        node:test suite; global fetch is stubbed, nothing touches the network
 docs/docs-alignment.md    every client-side deviation from DeepSeek's published API contract
+docs/pi-api-alignment.md  which pi release this package is verified against
 README.md                 user-facing documentation
 AGENTS.md                 this file
 CONTRIBUTING.md           four-line pointer to this file (GitHub convention)
@@ -21,8 +22,8 @@ tsconfig.json             the strict / noEmit settings used by typecheck
 
 ## Requirements and commands
 
-Node >= 22.6 (`engines`; the entry point is TypeScript and the test runner uses
-`--experimental-strip-types`). devDependencies stay limited to `typescript` and `@types/node`; the
+Node >= 22.19 (`engines`, the floor pi 1.5.1 itself requires; the entry point is TypeScript and
+the test runner uses `--experimental-strip-types`). devDependencies stay limited to `typescript` and `@types/node`; the
 publish workflow installs with `npm ci`, the test matrix with `npm install`.
 
 ```bash
@@ -118,6 +119,9 @@ is enough to check rendering. `npm test` needs neither key nor network.
   and constant and at the top of the register — keep them in step.
 - `CHANGELOG.md` follows Keep a Changelog. Put unreleased work under `[Unreleased]` with
   Added/Changed/Fixed headings; add the version heading when the release is tagged.
+- `docs/pi-api-alignment.md` records the pi release and Node version this package is verified
+  against. `PI_API_SNAPSHOT` in `src/index.ts`, that file and the README *Install* line move together;
+  `test/docs.test.ts` fails when they drift.
 - `AGENTS.md` (this file) holds contributor, architecture and release material.
 
 ## Release process

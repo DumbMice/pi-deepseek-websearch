@@ -1,6 +1,6 @@
 {
   "name": "@dumbmice/pi-deepseek-websearch",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "DeepSeek web search and page fetch tools for the pi coding agent: publication dates, authority, rerank scores, ori_question, count 1-50.",
   "type": "module",
   "license": "MIT",
@@ -41,12 +41,12 @@
     ]
   },
   "scripts": {
-    "test": "node --experimental-strip-types --no-warnings --test test/index.test.ts",
+    "test": "node --experimental-strip-types --no-warnings --test test/index.test.ts test/docs.test.ts",
     "typecheck": "tsc -p tsconfig.json",
     "pack:check": "npm pack --dry-run"
   },
   "engines": {
-    "node": ">=22.6"
+    "node": ">=22.19"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

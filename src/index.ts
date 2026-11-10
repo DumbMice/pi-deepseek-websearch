@@ -21,6 +21,7 @@
 import { isIP } from "node:net";
 
 export const DOCS_SNAPSHOT = "2026-10-30";
+export const PI_API_SNAPSHOT = "2026-11-06";
 export const PRICE_PER_SUCCESSFUL_REQUEST_USD = 0.00075;
 export const MAX_QUERY_CHARS = 128;
 
