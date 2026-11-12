@@ -19,7 +19,7 @@ test("docs: the register names the pi release the README claims", () => {
 	assert.match(read("docs/pi-api-alignment.md"), /\| \*\*1\.5\.2\*\* \|/);
 });
 
-test("docs: the declared Node floor matches pi 1.5.1's own floor", () => {
+test("docs: the declared Node floor matches pi's own floor", () => {
 	const pkg = JSON.parse(read("package.json")) as { engines?: { node?: string } };
 	assert.equal(pkg.engines?.node, ">=22.19");
 });

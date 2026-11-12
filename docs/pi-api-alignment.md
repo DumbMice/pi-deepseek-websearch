@@ -42,5 +42,5 @@ cannot affect this package.
    implement grep.
 3. **Package changelogs are read from the package root by 1.5.x.** `CHANGELOG.md` uses the required
    `## [x.y.z]` headings, so extension updates surface our notes without a `pi.changelogPath` entry.
-4. **Node floor.** pi 1.5.1 declares `>=22.19.0`; this package declares the same floor, because it
+4. **Node floor.** pi declares `>=22.19.0` (both tested releases); this package declares the same floor, because it
    only runs inside pi.

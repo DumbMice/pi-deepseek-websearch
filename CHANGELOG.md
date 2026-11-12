@@ -6,6 +6,12 @@ All notable changes to this extension are documented in this file. The format fo
 
 ## [Unreleased]
 
+### Fixed
+
+- The pi API register's Node-floor note and the docs test name still named 1.5.1 after the 0.1.7
+  re-verification; both now refer to the tested release generically so a future bump cannot leave them
+  behind.
+
 ## [0.1.7] - 2026-11-12
 
 ### Changed

@@ -22,7 +22,7 @@ tsconfig.json             the strict / noEmit settings used by typecheck
 
 ## Requirements and commands
 
-Node >= 22.19 (`engines`, the floor pi 1.5.1 itself requires; the entry point is TypeScript and
+Node >= 22.19 (`engines`, the floor pi itself requires; the entry point is TypeScript and
 the test runner uses `--experimental-strip-types`). devDependencies stay limited to `typescript` and `@types/node`; the
 publish workflow installs with `npm ci`, the test matrix with `npm install`.
 
