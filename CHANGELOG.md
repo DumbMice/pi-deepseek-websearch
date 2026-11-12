@@ -6,6 +6,14 @@ All notable changes to this extension are documented in this file. The format fo
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-11-12
+
+### Changed
+
+- Re-verified against pi **1.5.2** (was 1.5.1). `PI_API_SNAPSHOT`, the register row and the README
+  requirement move to it; 1.5.2's breaking changes (grep context lines, empty `tools` arrays,
+  markdown-transformer options) do not touch any surface this package uses. No runtime change.
+
 ## [0.1.6] - 2026-11-06
 
 ### Added
@@ -93,7 +101,8 @@ results are not billed. Validated against the DeepSeek API documentation as of 2
 - `deepseek_fetch` rejects local and private targets and never unescapes inside code.
 
 
-[Unreleased]: https://github.com/DumbMice/pi-deepseek-websearch/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/DumbMice/pi-deepseek-websearch/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/DumbMice/pi-deepseek-websearch/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/DumbMice/pi-deepseek-websearch/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/DumbMice/pi-deepseek-websearch/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/DumbMice/pi-deepseek-websearch/compare/v0.1.3...v0.1.4
