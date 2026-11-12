@@ -15,12 +15,12 @@
  * Endpoint override: PI_DEEPSEEK_BASE_URL, then DEEPSEEK_SEARCH_BASE_URL.
  *
  * Docs: https://api-docs.deepseek.com/guides/search
- * API reference snapshot used for validation: 2026-10-30.
+ * API reference snapshot used for validation: 2026-11-12.
  */
 
 import { isIP } from "node:net";
 
-export const DOCS_SNAPSHOT = "2026-10-30";
+export const DOCS_SNAPSHOT = "2026-11-12";
 export const PI_API_SNAPSHOT = "2026-11-12";
 export const PRICE_PER_SUCCESSFUL_REQUEST_USD = 0.00075;
 export const MAX_QUERY_CHARS = 128;

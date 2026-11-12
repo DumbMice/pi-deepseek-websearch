@@ -6,6 +6,13 @@ All notable changes to this extension are documented in this file. The format fo
 
 ## [Unreleased]
 
+### Changed
+
+- Re-validated DeepSeek's Search & Fetch documentation (`DOCS_SNAPSHOT` → 2026-11-12). Request and
+  response schemas, operators, limits, error taxonomy, price and QPS are unchanged. The one docs change
+  is the billing note: the temporary free window is gone, and Search/Fetch calls triggered through
+  DeepSeek Harness, Claude Code or Codex are now billed per successful request like direct calls.
+
 ### Fixed
 
 - The pi API register's Node-floor note and the docs test name still named 1.5.1 after the 0.1.7

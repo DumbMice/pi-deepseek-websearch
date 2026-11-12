@@ -8,7 +8,7 @@ versions that was established against.
 | `@earendil-works/pi-coding-agent` | **1.5.2** | `PI_API_SNAPSHOT` in `src/index.ts` |
 | `@earendil-works/pi-schema` (tool validation) | ships with pi 1.5.2 | this file (notes below) |
 | Node | 22.23.2 (tested); floor 22.19, the floor pi itself requires | `package.json` `engines`, README *Install* |
-| DeepSeek Search & Fetch API | docs snapshot 2026-10-30 | `DOCS_SNAPSHOT`; see `docs/docs-alignment.md` |
+| DeepSeek Search & Fetch API | docs snapshot 2026-11-12 | `DOCS_SNAPSHOT`; see `docs/docs-alignment.md` |
 
 Last verified **2026-11-12**. Bump a row here, its constant where one exists, and the README
 *Install* line in the same commit as the change that depends on it.

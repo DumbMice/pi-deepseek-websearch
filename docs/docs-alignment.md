@@ -2,7 +2,7 @@
 
 How this extension's behaviour relates to DeepSeek's published Search & Fetch API contract,
 validated against <https://api-docs.deepseek.com/guides/search>, `/api/search` and `/api/fetch`
-on **2026-10-30** (`DOCS_SNAPSHOT` in `src/index.ts`).
+on **2026-11-12** (`DOCS_SNAPSHOT` in `src/index.ts`).
 
 The wire contract is followed where the docs define it: endpoints, auth headers, request fields and
 defaults, response field semantics, price, QPS, and the documented error taxonomy. A request this
