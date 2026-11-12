@@ -46,7 +46,7 @@ pi install git:github.com/DumbMice/pi-deepseek-websearch
 
 Requirements:
 
-- **pi 1.5.1** (tested).
+- **pi 1.5.2** (tested).
 - Node >= 22.19, the floor pi itself requires.
 - A DeepSeek key, from pi's `deepseek` provider (`/login`) or the `DEEPSEEK_API_KEY` variable. Create
   one at <https://platform.deepseek.com/api_keys>.
@@ -54,7 +54,7 @@ Requirements:
   trailing slash or `/v1` suffix is stripped. The bare `DEEPSEEK_BASE_URL` is ignored on purpose,
   because other tools point it at an OpenAI-compatible `/v1` root.
 
-Last verified 2026-11-06; the table and what was checked is in
+Last verified 2026-11-12; the table and what was checked is in
 [docs/pi-api-alignment.md](https://github.com/DumbMice/pi-deepseek-websearch/blob/main/docs/pi-api-alignment.md).
 
 Confirm registration by starting `pi` and asking *"use deepseek_search to look up the DeepSeek API

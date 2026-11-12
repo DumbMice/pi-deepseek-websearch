@@ -15,8 +15,8 @@ test("docs: the README and the pi alignment register carry the same verified dat
 });
 
 test("docs: the register names the pi release the README claims", () => {
-	assert.match(read("README.md"), /\*\*pi 1\.5\.1\*\*/);
-	assert.match(read("docs/pi-api-alignment.md"), /\| \*\*1\.5\.1\*\* \|/);
+	assert.match(read("README.md"), /\*\*pi 1\.5\.2\*\*/);
+	assert.match(read("docs/pi-api-alignment.md"), /\| \*\*1\.5\.2\*\* \|/);
 });
 
 test("docs: the declared Node floor matches pi 1.5.1's own floor", () => {

@@ -5,12 +5,12 @@ versions that was established against.
 
 | Component | Tested version | Recorded in |
 |---|---|---|
-| `@earendil-works/pi-coding-agent` | **1.5.1** | `PI_API_SNAPSHOT` in `src/index.ts` |
-| `@earendil-works/pi-schema` (tool validation) | ships with pi 1.5.1 | this file (notes below) |
+| `@earendil-works/pi-coding-agent` | **1.5.2** | `PI_API_SNAPSHOT` in `src/index.ts` |
+| `@earendil-works/pi-schema` (tool validation) | ships with pi 1.5.2 | this file (notes below) |
 | Node | 22.23.2 (tested); floor 22.19, the floor pi itself requires | `package.json` `engines`, README *Install* |
 | DeepSeek Search & Fetch API | docs snapshot 2026-10-30 | `DOCS_SNAPSHOT`; see `docs/docs-alignment.md` |
 
-Last verified **2026-11-06**. Bump a row here, its constant where one exists, and the README
+Last verified **2026-11-12**. Bump a row here, its constant where one exists, and the README
 *Install* line in the same commit as the change that depends on it.
 
 ## What this extension actually uses
@@ -36,7 +36,11 @@ cannot affect this package.
    optional property dropped). This package uses only JSON Schema keywords, so nothing was lost, and
    the coercion is a net improvement: `allowed_domains: "example.com"` now arrives as
    `["example.com"]` instead of being rejected.
-2. **Package changelogs are read from the package root by 1.5.x.** `CHANGELOG.md` uses the required
+2. **1.5.2's breaking changes do not touch this package.** They cover `GrepOperations.readFile`
+   context lines, the omission of an empty `"tools": []` array for OpenAI-compatible models, and new
+   `pi.registerMarkdownTransformer()` options. This package registers no renderers and does not
+   implement grep.
+3. **Package changelogs are read from the package root by 1.5.x.** `CHANGELOG.md` uses the required
    `## [x.y.z]` headings, so extension updates surface our notes without a `pi.changelogPath` entry.
-3. **Node floor.** pi 1.5.1 declares `>=22.19.0`; this package declares the same floor, because it
+4. **Node floor.** pi 1.5.1 declares `>=22.19.0`; this package declares the same floor, because it
    only runs inside pi.
