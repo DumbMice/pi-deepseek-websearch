@@ -6,18 +6,18 @@ All notable changes to this extension are documented in this file. The format fo
 
 ## [Unreleased]
 
-### Changed
+## [0.1.8] - 2026-11-16
 
-- Re-checked after DeepSeek's 2026-11-12 docs revision: the Search & Fetch contract (request and
-  response fields, operators, limits, errors, price, QPS) is unchanged. DeepSeek added server-side web
-  tools (`deepseek_web_search`, `deepseek_read_url`) with image search in its Messages, Responses and
-  Chat Completions APIs; this package does not use them, and the README and pi API register now say
-  so.
+### Changed
 
 - Re-validated DeepSeek's Search & Fetch documentation (`DOCS_SNAPSHOT` → 2026-11-12). Request and
   response schemas, operators, limits, error taxonomy, price and QPS are unchanged. The one docs change
   is the billing note: the temporary free window is gone, and Search/Fetch calls triggered through
   DeepSeek Harness, Claude Code or Codex are now billed per successful request like direct calls.
+- The same revision added **server-side web tools** (`deepseek_web_search`, `deepseek_read_url`, with
+  image search) in DeepSeek's Messages, Responses and Chat Completions APIs. This package wraps the
+  direct Search & Fetch APIs and does not use them; the README and the pi API register now state that
+  boundary.
 
 ### Fixed
 
@@ -120,7 +120,8 @@ results are not billed. Validated against the DeepSeek API documentation as of 2
 - `deepseek_fetch` rejects local and private targets and never unescapes inside code.
 
 
-[Unreleased]: https://github.com/DumbMice/pi-deepseek-websearch/compare/v0.1.7...HEAD
+[Unreleased]: https://github.com/DumbMice/pi-deepseek-websearch/compare/v0.1.8...HEAD
+[0.1.8]: https://github.com/DumbMice/pi-deepseek-websearch/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/DumbMice/pi-deepseek-websearch/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/DumbMice/pi-deepseek-websearch/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/DumbMice/pi-deepseek-websearch/compare/v0.1.4...v0.1.5
