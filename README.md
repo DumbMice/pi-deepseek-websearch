@@ -34,6 +34,11 @@ query: DeepSeek V4 Pro release
 - The agent should read the page rather than the snippet: `need_content` returns extracted text, and
   `deepseek_fetch` reads a known URL.
 
+DeepSeek also ships **server-side web tools** (`deepseek_web_search`, `deepseek_read_url`) in its
+Messages, Responses and Chat Completions APIs, where the model decides when to search and answers with
+citations. This package exposes the direct Search & Fetch APIs instead; it does not call those tools.
+Image search is currently available only through them — DeepSeek says the Search API will add it later.
+
 ## Install
 
 ```bash

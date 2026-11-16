@@ -8,6 +8,12 @@ All notable changes to this extension are documented in this file. The format fo
 
 ### Changed
 
+- Re-checked after DeepSeek's 2026-11-12 docs revision: the Search & Fetch contract (request and
+  response fields, operators, limits, errors, price, QPS) is unchanged. DeepSeek added server-side web
+  tools (`deepseek_web_search`, `deepseek_read_url`) with image search in its Messages, Responses and
+  Chat Completions APIs; this package does not use them, and the README and pi API register now say
+  so.
+
 - Re-validated DeepSeek's Search & Fetch documentation (`DOCS_SNAPSHOT` → 2026-11-12). Request and
   response schemas, operators, limits, error taxonomy, price and QPS are unchanged. The one docs change
   is the billing note: the temporary free window is gone, and Search/Fetch calls triggered through

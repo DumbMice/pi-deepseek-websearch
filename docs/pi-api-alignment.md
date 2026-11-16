@@ -28,6 +28,11 @@ The contract is followed where it is documented, and nothing here calls pi inter
 It registers no commands, hooks, renderers or UI, so a release that only changes those surfaces
 cannot affect this package.
 
+**Out of scope:** DeepSeek's server-side web tools (`deepseek_web_search`, `deepseek_read_url`) in the
+Messages, Responses and Chat Completions APIs. The model drives those searches and answers with
+citations; this package calls `/v1/tools/search` and `/v1/tools/fetch` directly. Image search is
+web-tools-only today, and DeepSeek says the Search API will gain it later — watch that when it lands.
+
 ## Notes on the 1.5.x line
 
 1. **Tool validation moved to `@earendil-works/pi-schema` in 1.5.0.** TypeBox features outside JSON
