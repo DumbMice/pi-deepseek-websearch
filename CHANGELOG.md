@@ -6,6 +6,13 @@ All notable changes to this extension are documented in this file. The format fo
 
 ## [Unreleased]
 
+### Changed
+
+- Re-verified against pi **1.6.1** (was 1.5.2). `PI_API_SNAPSHOT`, the register row and the README
+  requirement move to it. The 1.6.x breaking changes (`render()` returning `readonly string[]`,
+  `after_provider_response` firing for HTTP errors and retried attempts, the `blockedKind` dialog
+  option) do not touch any surface this package uses. No runtime change.
+
 ## [0.1.8] - 2026-11-16
 
 ### Changed
