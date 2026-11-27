@@ -6,6 +6,8 @@ All notable changes to this extension are documented in this file. The format fo
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-11-16
+
 ### Changed
 
 - Re-verified against pi **1.6.1** (was 1.5.2). `PI_API_SNAPSHOT`, the register row and the README
@@ -127,7 +129,8 @@ results are not billed. Validated against the DeepSeek API documentation as of 2
 - `deepseek_fetch` rejects local and private targets and never unescapes inside code.
 
 
-[Unreleased]: https://github.com/DumbMice/pi-deepseek-websearch/compare/v0.1.8...HEAD
+[Unreleased]: https://github.com/DumbMice/pi-deepseek-websearch/compare/v0.1.9...HEAD
+[0.1.9]: https://github.com/DumbMice/pi-deepseek-websearch/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/DumbMice/pi-deepseek-websearch/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/DumbMice/pi-deepseek-websearch/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/DumbMice/pi-deepseek-websearch/compare/v0.1.5...v0.1.6
